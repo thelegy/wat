@@ -1,9 +1,7 @@
-{ self, nixpkgs, ... }:
+flakes@{ self, nixpkgs, ... }:
 with nixpkgs.lib;
 
-let
-  util = import ./helpers.nix {};
-in nixpkgs.lib // rec {
+nixpkgs.lib // rec {
 
   defaultSystems = platforms.linux;
 
@@ -36,17 +34,6 @@ in nixpkgs.lib // rec {
     })];
   };
 
-  mkWatRepo = fn: let
-    args = {
-      findMachines = dir: let
-        # TODO: rewite w/o using util
-        machineNames = with util; (readFilterDir (filterAnd [(not filterDirHidden) filterDirDirs]) dir);
-      in genAttrs machineNames (name: import (traceVal (dir +"/${name}")) (machineArgs name));
-    };
-    machineArgs = name: {
-      mkMachine = mkMachine name;
-    };
-    result = fn args;
-  in self.baseFlake // result.outputs;
+  mkWatRepo = import ./mkWatRepo.nix flakes;
 
 }

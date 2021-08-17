@@ -18,22 +18,7 @@ nixpkgs.lib // rec {
 
   eachDefaultSystem = eachSystem defaultSystems;
 
-  mkMachine = name: system: module: let
-
-  in nixosSystem {
-    inherit system;
-    modules = [({ config, lib, ... }: {
-      imports = [ module ];
-
-      nixpkgs.overlays = [ ];
-
-      nix.nixPath = [ "nixpkgs=${nixpkgs}" ];
-      nix.registry.nixpkgs.flake = nixpkgs;
-      nix.registry.n.flake = nixpkgs;
-      networking.hostName = lib.mkDefault name;
-    })];
-  };
-
+  mkMachine = import ./mkMachine.nix flakes;
   mkWatRepo = import ./mkWatRepo.nix flakes;
 
 }

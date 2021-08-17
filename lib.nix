@@ -29,11 +29,9 @@ in nixpkgs.lib // rec {
 
       nixpkgs.overlays = [ ];
 
-      system.configurationRevision = lib.mkIf (flakes.self ? rev) flakes.self.rev;
-      nix.nixPath = [ "nixpkgs=${pkgs}" ];
-      nix.registry.nixpkgs.flake = pkgs;
-      nix.registry.n.flake = pkgs;
-
+      nix.nixPath = [ "nixpkgs=${nixpkgs}" ];
+      nix.registry.nixpkgs.flake = nixpkgs;
+      nix.registry.n.flake = nixpkgs;
       networking.hostName = lib.mkDefault name;
     })];
   };

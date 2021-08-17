@@ -39,7 +39,7 @@ in nixpkgs.lib // rec {
   mkWatRepo = fn: let
     args = {
       findMachines = dir: let
-
+        # TODO: rewite w/o using util
         machineNames = with util; (readFilterDir (filterAnd [(not filterDirHidden) filterDirDirs]) dir);
       in genAttrs machineNames (name: import (traceVal (dir +"/${name}")) (machineArgs name));
     };
@@ -47,6 +47,6 @@ in nixpkgs.lib // rec {
       mkMachine = mkMachine name;
     };
     result = fn args;
-  in self.baseFlake // result;
+  in self.baseFlake // result.outputs;
 
 }

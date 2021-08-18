@@ -13,10 +13,10 @@ name:
 
 module:
 
-nixosSystem {
-  inherit system;
-  modules = [({ config, lib, ... }: {
-    imports = attrValues extraModules ++ loadModules ++ [ module ];
+let
+
+  baseConfiguration = { config, lib, ... }: {
+    imports = [ module ];
 
     nixpkgs.overlays = [ ];
 
@@ -25,6 +25,10 @@ nixosSystem {
     nix.nixPath = [ "nixpkgs=${nixpkgs}" ];
     nix.registry.nixpkgs.flake = nixpkgs;
     nix.registry.n.flake = nixpkgs;
-    networking.hostName = lib.mkDefault name;
-  })];
+    networking.hostName = mkDefault name;
+  };
+
+in nixosSystem {
+  inherit system;
+  modules = attrValues extraModules ++ loadModules ++ [baseConfiguration module];
 }

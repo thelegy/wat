@@ -18,6 +18,7 @@ nixpkgs.lib // rec {
 
   eachDefaultSystem = eachSystem defaultSystems;
 
+  baseFlake = import ./baseFlake.nix flakes;
   mkMachine = import ./mkMachine.nix flakes;
   mkWatRepo = import ./mkWatRepo.nix flakes;
 

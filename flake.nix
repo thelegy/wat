@@ -4,8 +4,6 @@
 
     lib = import ./lib flakes;
 
-    baseFlake = import ./baseFlake.nix flakes;
-
   };
 
 }

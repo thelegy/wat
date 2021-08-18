@@ -1,9 +1,14 @@
 { self, ... }:
 with self.lib;
 
-fn: let
+
+flakes@{ nixpkgs, ... }:
+fn:
+
+let
 
   args = {
+
     findMachines = dir: let
       machineNames = pipe dir [
         builtins.readDir
@@ -11,12 +16,14 @@ fn: let
         attrNames
       ];
     in genAttrs machineNames (name: import (traceVal (dir +"/${name}")) (machineArgs name));
+
    };
 
    machineArgs = name: {
-    mkMachine = mkMachine name;
+    inherit flakes;
+    mkMachine = mkMachine flakes name;
    };
 
    result = fn args;
 
-in self.baseFlake // result.outputs
+in baseFlake // result.outputs

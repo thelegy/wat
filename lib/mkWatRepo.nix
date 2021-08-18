@@ -7,7 +7,23 @@ fn:
 
 let
 
+  machineArgs = name: {
+    inherit flakes;
+    mkMachine = mkMachine {inherit flakes; extraModules = result.loadModules or [];} name;
+  };
+
   args = {
+
+    findModules = namespace: dir: let
+      moduleNames = pipe dir [
+        builtins.readDir
+        (filterAttrs (key: val: ! hasPrefix "." key && (hasSuffix ".nix" key || val == "directory")))
+        attrNames
+      ];
+    in listToAttrs (forEach moduleNames (name: mkModule {
+      path = dir + "/${name}";
+      namespace = [ "wat" ] ++ namespace;
+    }));
 
     findMachines = dir: let
       machineNames = pipe dir [
@@ -15,15 +31,10 @@ let
         (filterAttrs (key: val: ! hasPrefix "." key && val == "directory"))
         attrNames
       ];
-    in genAttrs machineNames (name: import (traceVal (dir +"/${name}")) (machineArgs name));
+    in genAttrs machineNames (name: import (dir + "/${name}") (machineArgs name));
 
-   };
+  };
 
-   machineArgs = name: {
-    inherit flakes;
-    mkMachine = mkMachine flakes name;
-   };
-
-   result = fn args;
+  result = fn args;
 
 in baseFlake // result.outputs

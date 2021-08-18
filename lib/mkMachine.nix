@@ -2,7 +2,7 @@
 with self.lib;
 
 
-flakes:
+{ flakes ? {}, extraModules ? [] }:
 name:
 nixpkgs:
 system:
@@ -11,7 +11,7 @@ module:
 nixosSystem {
   inherit system;
   modules = [({ config, lib, ... }: {
-    imports = [ module ];
+    imports = attrValues extraModules ++ [ module ];
 
     nixpkgs.overlays = [ ];
 

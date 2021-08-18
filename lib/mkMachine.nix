@@ -3,15 +3,20 @@ with self.lib;
 
 
 { flakes ? {}, extraModules ? [] }:
+
 name:
-nixpkgs:
-system:
+
+{ nixpkgs ? flakes.nixpkgs
+, system ? "x86_64-linux"
+, loadModules ? []
+}:
+
 module:
 
 nixosSystem {
   inherit system;
   modules = [({ config, lib, ... }: {
-    imports = attrValues extraModules ++ [ module ];
+    imports = attrValues extraModules ++ loadModules ++ [ module ];
 
     nixpkgs.overlays = [ ];
 

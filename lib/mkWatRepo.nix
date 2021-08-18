@@ -37,4 +37,4 @@ let
 
   result = fn args;
 
-in baseFlake // result.outputs
+in recursiveUpdate baseFlake result.outputs

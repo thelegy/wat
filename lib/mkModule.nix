@@ -26,7 +26,7 @@ let
         cfg = extractFromNamespace config;
         baseOptions = liftToNamespace {enable = mkEnableOption "Enable the ${moduleName} config layer";};
       in {
-        options = baseOptions // options;
+        options = recursiveUpdate baseOptions options;
         config = mkIf cfg.enable (moduleConfig cfg);
       };
     in { imports = [ mkModule_ ]; };

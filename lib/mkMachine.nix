@@ -31,5 +31,5 @@ let
 
 in nixosSystem {
   inherit system;
-  modules = attrValues extraModules ++ loadModules ++ [ baseConfiguration module ];
+  modules = extraModules ++ loadModules ++ [ baseConfiguration module ];
 }

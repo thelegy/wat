@@ -7,9 +7,9 @@ eachDefaultSystem (system: pkgs: rec {
   packages.wat-deploy-tools = pkgs.runCommand "wat-deploy-tools" {} ''
     mkdir -p $out/bin
     shopt -s extglob
-    cp ${./wat-deploy-tools}/!(util.zsh) $out/bin
+    cp ${../wat-deploy-tools}/!(util.zsh) $out/bin
     for file in $out/bin/*; do
-      export utilPath=${./wat-deploy-tools/util.zsh}
+      export utilPath=${../wat-deploy-tools/util.zsh}
       substituteAllInPlace $file
     done
   '';

@@ -2,7 +2,10 @@
 with self.lib;
 
 
-{ flakes ? {}, extraModules ? [] }:
+{ flakes ? {}
+, extraOverlays ? []
+, extraModules ? []
+}:
 
 name:
 
@@ -16,9 +19,7 @@ module:
 let
 
   baseConfiguration = { config, lib, ... }: {
-    imports = [ module ];
-
-    nixpkgs.overlays = [ ];
+    nixpkgs.overlays = extraOverlays;
 
     _module.args.flakes = flakes;
 
@@ -30,5 +31,5 @@ let
 
 in nixosSystem {
   inherit system;
-  modules = attrValues extraModules ++ loadModules ++ [baseConfiguration module];
+  modules = attrValues extraModules ++ loadModules ++ [ baseConfiguration module ];
 }

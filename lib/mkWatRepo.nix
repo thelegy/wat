@@ -9,7 +9,11 @@ let
 
   machineArgs = name: {
     inherit flakes;
-    mkMachine = mkMachine {inherit flakes; extraModules = result.loadModules or [];} name;
+    mkMachine = mkMachine {
+      inherit flakes;
+      extraOverlays = result.loadOverlays or [];
+      extraModules = result.loadModules or [];
+    } name;
   };
 
   args = {

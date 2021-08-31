@@ -1,3 +1,0 @@
-#!/bin/sh
-
-nix build .#wat-deploy-tools-envrc --out-link .envrc

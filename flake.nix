@@ -4,6 +4,8 @@
 
     lib = import ./lib flakes;
 
+    nixosModules = {};
+
   };
 
 }

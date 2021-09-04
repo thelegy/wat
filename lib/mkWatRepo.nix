@@ -7,13 +7,22 @@ fn:
 
 let
 
+  dontLoadFlakeModules = result.dontLoadFlakeModules or false;
+  dontLoadFlakeOverlay = result.dontLoadFlakeOverlay or false;
+  dontLoadWatModules = result.dontLoadWatModules or false;
+
+  extraOverlays = (result.loadOverlays or [])
+    ++ (optionals (!dontLoadFlakeOverlay) (toList (flakes.self.overlay or [])))
+  ;
+
+  extraModules = (result.loadModules or [])
+    ++ (optionals (!dontLoadWatModules) (attrValues self.nixosModules))
+    ++ (optionals (!dontLoadFlakeModules) (attrValues (flakes.self.nixosModules or {})))
+  ;
+
   machineArgs = name: {
     inherit flakes;
-    mkMachine = mkMachine {
-      inherit flakes;
-      extraOverlays = result.loadOverlays or [];
-      extraModules = result.loadModules or [];
-    } name;
+    mkMachine = mkMachine { inherit flakes extraOverlays extraModules; } name;
   };
 
   args = {

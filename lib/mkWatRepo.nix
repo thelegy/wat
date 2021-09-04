@@ -10,6 +10,7 @@ let
   dontLoadFlakeModules = result.dontLoadFlakeModules or false;
   dontLoadFlakeOverlay = result.dontLoadFlakeOverlay or false;
   dontLoadWatModules = result.dontLoadWatModules or false;
+  namespacePrefix = result.namespacePrefix or [ "wat" ];
 
   extraOverlays = (result.loadOverlays or [])
     ++ (optionals (!dontLoadFlakeOverlay) (toList (flakes.self.overlay or [])))
@@ -35,7 +36,7 @@ let
       ];
     in listToAttrs (forEach moduleNames (name: mkModule {
       path = dir + "/${name}";
-      namespace = [ "wat" ] ++ namespace;
+      namespace = namespacePrefix ++ namespace;
     }));
 
     findMachines = dir: let

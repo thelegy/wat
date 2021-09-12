@@ -21,5 +21,8 @@ writeScript "activationScript" ''
   echo Installing bootloader
   ${nixos-enter}/bin/nixos-enter --root /mnt -c "NIXOS_INSTALL_BOOTLOADER=1 '$1/bin/switch-to-configuration' boot"
 
+  echo Copy ssh keys from installer if none are present on the target system yet
+  ${coreutils}/bin/cp --no-clobber /etc/ssh/ssh_host_* /mnt/etc/ssh
+
   ${coreutils}/bin/sync
 ''

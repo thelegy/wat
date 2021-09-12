@@ -6,6 +6,7 @@
 , coreutils
 , cryptsetup
 , dosfstools
+, jq
 , lvm2
 , util-linux
 , zsh
@@ -37,13 +38,9 @@ in writeScript "format-luks-lvm-bcachefs" ''
   # reset path to ensure the independence of this script
   export PATH=
 
-  ${util-linux}/bin/lsblk ${installDisk}
-  echo '!!! This will WIPE THE WHOLE DISK "${installDisk}". Please type the Hostname "${hostName}" to verify this and continue:'
-  read -r confirmation
-  if [[ "$confirmation" != "${hostName}" ]]; then
-    echo Aborting the installation.
-    exit 1
-  fi
+  preData="$(</dev/stdin)"
+  luksPassphrase="$(${jq}/bin/jq -r '.luksPassphrase' <<<$preData)"
+  unset preData
 
   echo Install now
 
@@ -73,13 +70,15 @@ in writeScript "format-luks-lvm-bcachefs" ''
   ${dosfstools}/bin/mkfs.fat -F32 -i "${replaceStrings ["-"] [""] efiId}" -n ESP "${espPartition}"
 
   echo Create LUKS cryptvol
-  ${cryptsetup}/bin/cryptsetup luksFormat --type luks2 --uuid "${luksUuid}" "${luksPartition}"
+  ${cryptsetup}/bin/cryptsetup --batch-mode --key-file <(echo -n "$luksPassphrase") luksFormat --type luks2 --uuid "${luksUuid}" "${luksPartition}"
 
   echo Mounting LUKS cryptvol for the first time
+  luksSsdOptions=""
   if $ssd; then
-    luksSsdOptions="--allow-discards --persistent"
+    luksSsdOptions=(--allow-discards --persistent)
   fi
-  ${cryptsetup}/bin/cryptsetup ''${luksSsdOptions:-} open "${luksPartition}" "${luksVolName}"
+  ${cryptsetup}/bin/cryptsetup --batch-mode --key-file <(echo -n "$luksPassphrase") $luksSsdOptions open "${luksPartition}" "${luksVolName}"
+  unset luksPassphrase
 
   echo Setup lvm
   ${lvm2.bin}/bin/pvcreate "${lvmPartition}"

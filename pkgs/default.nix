@@ -3,12 +3,14 @@ final: prev:
 with final.lib;
 with final;
 
-{
+let
+  wat = self;
+in {
 
   wat-deploy = callPackage ./deploy.nix {};
-  wat-gather = callPackage ./wat-gather.nix { wat = self; };
+  wat-gather = callPackage ./wat-gather.nix { inherit wat; };
   wat-gather-script = callPackage ./gatherScript.nix {};
-  wat-install = callPackage ./wat-install.nix { wat = self; };
+  wat-install = callPackage ./wat-install.nix { inherit nixpkgs wat; };
   wat-install-activation = callPackage ./wat-install-activation.nix {};
   wat-install-helpers = callPackage ./wat-install-helpers {};
   wat-update-envrc = callPackage ./update-envrc.nix {};

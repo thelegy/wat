@@ -29,7 +29,7 @@ in {
       type = types.str;
     };
 
-    wat.build.install-prepare = mkOption {
+    wat.build.install-format = mkOption {
       type = with types; nullOr package;
       internal = true;
       default = null;
@@ -39,7 +39,7 @@ in {
 
   config = mkIf cfg.installer.enable {
 
-    wat.build.install-prepare = pkgs.wat-install-helpers.format-luks-lvm-bcachefs {
+    wat.build.install-format = pkgs.wat-install-helpers.format-luks-lvm-bcachefs {
       nixosConfig = config;
       installDisk = cfg.installer.installDisk;
       efiId = cfg.installer.efiId;

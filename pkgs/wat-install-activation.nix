@@ -1,4 +1,10 @@
-{ writeScript, coreutils, zsh, nix, nixos-enter }:
+{ writeScript
+, coreutils
+, nix
+, nixos-enter
+, openssh
+, zsh
+}:
 
 writeScript "activationScript" ''
   #!${zsh}/bin/zsh
@@ -6,6 +12,12 @@ writeScript "activationScript" ''
 
   # reset path to ensure the independence of this script
   export PATH=
+
+  ${coreutils}/bin/mkdir -p /mnt/etc/secrets
+  if [[ ! -e /mnt/etc/secrets/initrd_ed25519_host_key ]]; then
+    echo Create initrd host key
+    ${openssh}/bin/ssh-keygen -t ed25519 -N "" -f /mnt/etc/secrets/initrd_ed25519_host_key
+  fi
 
   echo Setting system profile
   ${nix}/bin/nix-env --store /mnt --profile /mnt/nix/var/nix/profiles/system --set "$1"

@@ -1,14 +1,23 @@
-{ self, ... }:
+{ self, nixpkgs, ... }:
 with self.lib;
 
 
 eachDefaultSystem (system: pkgs: rec {
 
-  packages.wat-deploy-tools = pkgs.callPackage ../wat-deploy-tools {};
+  systemOverlays = [ self.overlay ];
 
-  packages.wat-deploy-tools-envrc = pkgs.writeText "wat-deploy-tools-envrc" ''
-    PATH_add ${packages.wat-deploy-tools}/bin
-  '';
+  packages = {
+    inherit (pkgs)
+      wat-deploy-tools
+      wat-deploy-tools-envrc
+      ;
+  };
+
+  legacyPackages = {
+    inherit (pkgs)
+      wat-install-helpers
+      ;
+  };
 
   defaultPackage = packages.wat-deploy-tools;
 

@@ -10,10 +10,12 @@ let
   dontLoadFlakeModules = result.dontLoadFlakeModules or false;
   dontLoadFlakeOverlay = result.dontLoadFlakeOverlay or false;
   dontLoadWatModules = result.dontLoadWatModules or false;
+  dontLoadWatOverlay = result.dontLoadWatOverlay or false;
   namespacePrefix = result.namespacePrefix or [ "wat" ];
 
   extraOverlays = (result.loadOverlays or [])
     ++ (optionals (!dontLoadFlakeOverlay) (toList (flakes.self.overlay or [])))
+    ++ (optionals (!dontLoadWatOverlay) (toList (self.overlay or [])))
   ;
 
   extraModules = (result.loadModules or [])

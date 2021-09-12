@@ -18,10 +18,14 @@ module:
 
 let
 
+  availableModules = extraModules ++ loadModules;
+
   baseConfiguration = { config, lib, ... }: {
     nixpkgs.overlays = extraOverlays;
 
-    _module.args.flakes = flakes;
+    _module.args = {
+      inherit flakes availableModules;
+    };
 
     nix.nixPath = [ "nixpkgs=${nixpkgs}" ];
     nix.registry.nixpkgs.flake = nixpkgs;
@@ -31,5 +35,5 @@ let
 
 in nixosSystem {
   inherit system;
-  modules = extraModules ++ loadModules ++ [ baseConfiguration module ];
+  modules = availableModules ++ [ baseConfiguration module ];
 }

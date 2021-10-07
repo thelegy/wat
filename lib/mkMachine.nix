@@ -33,7 +33,7 @@ let
     networking.hostName = mkDefault name;
   };
 
-in nixosSystem {
+in nixpkgs.lib.nixosSystem {
   inherit system;
   modules = availableModules ++ [ baseConfiguration module ];
 }

@@ -12,6 +12,8 @@ let
 
   moduleNamespace = namespace ++ [moduleName];
 
+  applyIfFunction = o: arg: if isFunction o then o arg else o;
+
   additionalModuleArgs = rec {
 
     inherit moduleName;
@@ -26,8 +28,8 @@ let
         cfg = extractFromNamespace config;
         baseOptions = liftToNamespace {enable = mkEnableOption "Enable the ${moduleName} config layer";};
       in {
-        options = recursiveUpdate baseOptions options;
-        config = mkIf cfg.enable (moduleConfig cfg);
+        options = recursiveUpdate baseOptions (applyIfFunction options cfg);
+        config = mkIf cfg.enable (applyIfFunction moduleConfig cfg);
       };
     in { imports = [ mkModule_ ]; };
 

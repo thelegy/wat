@@ -4,71 +4,68 @@ with lib;
 
 let
 
-  cfg = config.wat;
+  cfg = config.wat.build;
   hostname = config.networking.hostName;
 
 in {
 
   options = {
 
-    wat.installer.enable = mkEnableOption "";
+    wat.build.installer = {
+      format.configure = mkOption {
+        type = types.lines;
+        internal = true;
+      };
 
-    wat.installer.installDisk = mkOption {
-      type = types.str;
+      format.wipe = mkOption {
+        type = types.lines;
+        internal = true;
+      };
+
+      format.partiionOuter = mkOption {
+        type = types.lines;
+        internal = true;
+      };
+
+      format.encryptionSetup = mkOption {
+        type = types.lines;
+        internal = true;
+      };
+
+      format.partitionInner = mkOption {
+        type = types.lines;
+        internal = true;
+      };
     };
 
-    wat.installer.efiId = mkOption {
-      type = types.str;
-    };
-
-    wat.installer.luksUuid = mkOption {
-      type = types.str;
-    };
-
-    wat.installer.swapUuid = mkOption {
-      type = types.str;
-    };
-
-    wat.build.install-format = mkOption {
-      type = with types; nullOr package;
+    wat.build.installer.format.script = mkOption {
+      type = types.package;
       internal = true;
-      default = null;
     };
 
   };
 
-  config = mkIf cfg.installer.enable {
+  config = {
 
-    wat.build.install-format = pkgs.wat-install-helpers.format-luks-lvm-bcachefs {
-      nixosConfig = config;
-      installDisk = cfg.installer.installDisk;
-      efiId = cfg.installer.efiId;
-      luksUuid = cfg.installer.luksUuid;
-      swapUuid = cfg.installer.swapUuid;
-    };
+    wat.build.installer.format.script = pkgs.writeScript "wat-installer-${hostname}" ''
+      #!${pkgs.zsh}/bin/zsh
+      set -euo pipefail
 
-    boot.kernelPackages = pkgs.linuxPackages_testing_bcachefs;
+      # reset path to ensure the independence of this script
+      export PATH=
 
-    boot.initrd.availableKernelModules = [ "bcache" ];
+      ${cfg.installer.format.configure}
 
-    boot.initrd.luks.devices."${hostname}" = {
-      device = "/dev/disk/by-uuid/${cfg.installer.luksUuid}";
-      allowDiscards = true;
-    };
+      echo Install now
 
-    fileSystems."/" = {
-      device = "/dev/mapper/vg_${hostname}-system";
-      fsType = "bcachefs";
-    };
+      ${cfg.installer.format.wipe}
 
-    fileSystems."/boot" = {
-      device = "/dev/disk/by-uuid/${cfg.installer.efiId}";
-      fsType = "vfat";
-    };
+      ${cfg.installer.format.partiionOuter}
 
-    swapDevices = [{
-      device = "/dev/mapper/vg_${hostname}-swap";
-    }];
+      ${cfg.installer.format.encryptionSetup}
+
+      ${cfg.installer.format.partitionInner}
+    '';
 
   };
 

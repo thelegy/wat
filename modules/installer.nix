@@ -1,5 +1,9 @@
 flakes:
-{ lib, config, pkgs, ... }:
+{ lib
+, wat-installer-lib
+, config
+, pkgs
+, ... }:
 with lib;
 
 let
@@ -7,9 +11,20 @@ let
   cfg = config.wat.build;
   hostname = config.networking.hostName;
 
+  inherit (wat-installer-lib) uuidgen;
+
 in {
 
   options = {
+
+    wat.installer.repoUuid = mkOption {
+      type = types.str;
+    };
+
+    wat.installer.hostUuid = mkOption {
+      type = types.str;
+      default = uuidgen { namespace = config.wat.installer.repoUuid; name = hostname; };
+    };
 
     wat.build.installer = {
       format.configure = mkOption {

@@ -12,6 +12,12 @@ let
   dontLoadWatModules = result.dontLoadWatModules or false;
   dontLoadWatOverlay = result.dontLoadWatOverlay or false;
   namespacePrefix = result.namespacePrefix or [ "wat" ];
+  repoUuidModule = { wat-installer-lib, ... }: {
+    wat.installer.repoUuid = foldl'
+      (namespace: name: wat-installer-lib.uuidgen { inherit namespace name;})
+      "59d93334-df87-4242-ac91-9c48886b4d94"
+      (result.namespace or []);
+  };
 
   extraOverlays = (result.loadOverlays or [])
     ++ (optionals (!dontLoadFlakeOverlay) (toList (flakes.self.overlay or [])))
@@ -20,6 +26,7 @@ let
 
   extraModules = (result.loadModules or [])
     ++ (optionals (!dontLoadWatModules) (attrValues self.nixosModules))
+    ++ (optionals (!dontLoadWatModules) [repoUuidModule])
     ++ (optionals (!dontLoadFlakeModules) (attrValues (flakes.self.nixosModules or {})))
   ;
 

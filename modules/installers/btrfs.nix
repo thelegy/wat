@@ -1,13 +1,17 @@
 { lib
+, wat-installer-lib
 , pkgs
 , config
-, ... }: with lib;
+, ... }:
+with lib;
 
 let
 
   cfg = config.wat.installer.btrfs;
   hostname = config.networking.hostName;
-  installer-lib = config.wat-installer-lib;
+  hostUuid = config.wat.installer.hostUuid;
+
+  inherit (wat-installer-lib) uuidgen;
 
   isEfi = cfg.bootloader == "efi";
   isGrub = cfg.bootloader == "grub";
@@ -24,11 +28,6 @@ in {
         default = "efi";
       };
 
-      hostUuid = mkOption {
-        type = types.str;
-        default = installer-lib.uuidgen { name = hostname; };
-      };
-
       installDisk = mkOption {
         type = types.str;
       };
@@ -40,7 +39,7 @@ in {
 
       efiId = mkOption {
         type = types.str;
-        default = substring 0 8 (installer-lib.uuidgen { namespace = cfg.hostUuid; name = "efi"; });
+        default = substring 0 8 (uuidgen { name = "efi"; });
       };
 
       swapSize = mkOption {
@@ -50,12 +49,12 @@ in {
 
       swapUuid = mkOption {
         type = types.str;
-        default = installer-lib.uuidgen { namespace = cfg.hostUuid; name = "swap"; };
+        default = uuidgen { name = "swap"; };
       };
 
       systemUuid = mkOption {
         type = types.str;
-        default = installer-lib.uuidgen { namespace = cfg.hostUuid; name = "system"; };
+        default = uuidgen { name = "system"; };
       };
 
       systemLabel = mkOption {

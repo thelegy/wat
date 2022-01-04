@@ -43,10 +43,11 @@ in {
         networks.default = {
           matchConfig.MACAddress = cfg.macAddress;
           address = optional (!isNull cfg.ipv6Address) cfg.ipv6Address;
-          dns = [
-            "213.133.98.98"
-            "213.133.99.99"
-            "213.133.100.100"
+          dns = mkDefault [
+            "2a01:4ff:ff00::add:1"
+            "2a01:4ff:ff00::add:2"
+            "185.12.64.1"
+            "185.12.64.2"
           ];
           gateway = [
             "172.31.1.1"

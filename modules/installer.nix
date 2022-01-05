@@ -3,8 +3,7 @@ flakes:
 , wat-installer-lib
 , config
 , pkgs
-, ... }:
-with lib;
+, ... }: with lib;
 
 let
 
@@ -37,7 +36,7 @@ in {
         internal = true;
       };
 
-      format.partiionOuter = mkOption {
+      format.partitionOuter = mkOption {
         type = types.lines;
         internal = true;
       };
@@ -75,7 +74,7 @@ in {
 
       ${cfg.installer.format.wipe}
 
-      ${cfg.installer.format.partiionOuter}
+      ${cfg.installer.format.partitionOuter}
 
       ${cfg.installer.format.encryptionSetup}
 

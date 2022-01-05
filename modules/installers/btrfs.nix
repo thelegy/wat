@@ -2,8 +2,7 @@
 , wat-installer-lib
 , pkgs
 , config
-, ... }:
-with lib;
+, ... }: with lib;
 
 let
 
@@ -133,7 +132,7 @@ in {
         ''
       );
 
-      format.partiionOuter = mkMerge (
+      format.partitionOuter = mkMerge (
         singleton ''
           echo Creating partition table
           ${pkgs.util-linux}/bin/sfdisk $installDisk <<EOF

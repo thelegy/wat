@@ -62,6 +62,11 @@ in {
         };
       };
 
+      networking.timeServers = mkDefault [
+        "ntp1.hetzner.de"
+        "ntp2.hetzner.com"
+        "ntp3.hetzner.net"
+      ];
 
       boot.initrd.availableKernelModules = [
         "ahci"

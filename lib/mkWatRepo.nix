@@ -13,10 +13,10 @@ let
   dontLoadWatOverlay = result.dontLoadWatOverlay or false;
   namespacePrefix = result.namespacePrefix or [ "wat" ];
   repoUuidModule = { wat-installer-lib, ... }: {
-    wat.installer.repoUuid = foldl'
+    wat.installer.repoUuid = result.repoUuid or (foldl'
       (namespace: name: wat-installer-lib.uuidgen { inherit namespace name;})
       "59d93334-df87-4242-ac91-9c48886b4d94"
-      (result.namespace or []);
+      (result.namespace or []));
   };
 
   extraOverlays = (result.loadOverlays or [])

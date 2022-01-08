@@ -7,35 +7,46 @@ fn:
 
 let
 
-  dontLoadFlakeModules = result.dontLoadFlakeModules or false;
-  dontLoadFlakeOverlay = result.dontLoadFlakeOverlay or false;
-  dontLoadWatModules = result.dontLoadWatModules or false;
-  dontLoadWatOverlay = result.dontLoadWatOverlay or false;
-  namespacePrefix = result.namespacePrefix or [ "wat" ];
-  repoUuidModule = { wat-installer-lib, ... }: {
-    wat.installer.repoUuid = result.repoUuid or (foldl'
-      (namespace: name: wat-installer-lib.uuidgen { inherit namespace name;})
-      "59d93334-df87-4242-ac91-9c48886b4d94"
-      (result.namespace or []));
+  defaultArgs = {
+    dontLoadFlakeModules = false;
+    dontLoadWatModules = false;
+    loadModules = [];
+
+    dontLoadFlakeOverlay = false;
+    dontLoadWatOverlay = false;
+    loadOverlays = [];
+
+    namespacePrefix = [ "wat" ];
+    namespace = [];
+    repoUuid = null;
   };
 
-  extraOverlays = (result.loadOverlays or [])
-    ++ (optionals (!dontLoadFlakeOverlay) (toList (flakes.self.overlay or [])))
-    ++ (optionals (!dontLoadWatOverlay) (toList (self.overlay or [])))
-  ;
+  repoGenFn = a: with a; let
 
-  extraModules = (result.loadModules or [])
-    ++ (optionals (!dontLoadWatModules) (attrValues self.nixosModules))
-    ++ (optionals (!dontLoadWatModules) [repoUuidModule])
-    ++ (optionals (!dontLoadFlakeModules) (attrValues (flakes.self.nixosModules or {})))
-  ;
+    repoUuidModule = { wat-installer-lib, ... }: {
+      wat.installer.repoUuid = if !isNull repoUuid then repoUuid else (foldl'
+        (namespace: name: wat-installer-lib.uuidgen { inherit namespace name;})
+        "59d93334-df87-4242-ac91-9c48886b4d94"
+        namespace);
+    };
 
-  machineArgs = name: {
-    inherit flakes;
-    mkMachine = mkMachine { inherit flakes extraOverlays extraModules; } name;
-  };
+    extraOverlays = loadOverlays
+      ++ (optionals (!dontLoadFlakeOverlay) (toList (flakes.self.overlay or [])))
+      ++ (optionals (!dontLoadWatOverlay) (toList (self.overlay or [])))
+    ;
 
-  args = {
+    extraModules = loadModules
+      ++ (optionals (!dontLoadWatModules) (attrValues self.nixosModules))
+      ++ (optionals (!dontLoadWatModules) [repoUuidModule])
+      ++ (optionals (!dontLoadFlakeModules) (attrValues (flakes.self.nixosModules or {})))
+    ;
+
+    machineArgs = name: {
+      inherit flakes;
+      mkMachine = mkMachine { inherit flakes extraOverlays extraModules; } name;
+    };
+
+  in fn {
 
     findModules = namespace: dir: let
       moduleNames = pipe dir [
@@ -58,6 +69,16 @@ let
 
   };
 
-  result = fn args;
+  filterApplyDefaultArgs = fn: r: fn (mapAttrs (key: val: attrByPath [key] val r) defaultArgs);
 
-in recursiveUpdate baseFlake result.outputs
+  filterOutputs = flip pipe [
+    (filterAttrs (key: val: !hasAttr key defaultArgs))
+    ({ outputs }: outputs)
+  ];
+
+in pipe repoGenFn [
+  filterApplyDefaultArgs
+  fix
+  filterOutputs
+  (recursiveUpdate baseFlake)
+]

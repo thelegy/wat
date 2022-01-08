@@ -13,12 +13,6 @@ eachDefaultSystem (system: pkgs: rec {
       ;
   };
 
-  legacyPackages = {
-    inherit (pkgs)
-      wat-install-helpers
-      ;
-  };
-
   defaultPackage = packages.wat-deploy-tools;
 
 })

@@ -7,7 +7,9 @@ with self.lib;
 , extraModules ? []
 }:
 
-name:
+{ name
+, path ? null
+}:
 
 { nixpkgs ? flakes.nixpkgs
 , system ? "x86_64-linux"
@@ -19,6 +21,20 @@ module:
 let
 
   availableModules = extraModules ++ loadModules;
+
+  lookupMachineFiles = dir: prefix: let
+    dirContents = builtins.readDir (dir + "/${prefix}");
+    fileNames = attrNames dirContents;
+    toFileList = key:
+      if dirContents.${key} == "regular"
+        then singleton (nameValuePair (prefix + key) (dir + "/${prefix}${key}"))
+        else if dirContents.${key} == "directory"
+          then lookupMachineFiles dir ("${prefix}${key}/")
+          else [];
+    fileList = concatMap toFileList fileNames;
+  in fileList;
+
+  machineFiles = if isNull path then {} else listToAttrs (lookupMachineFiles path "");
 
   baseConfiguration = { config, lib, ... }: {
     nixpkgs.overlays = extraOverlays;
@@ -36,4 +52,6 @@ let
 in nixpkgs.lib.nixosSystem {
   inherit system;
   modules = availableModules ++ [ baseConfiguration module ];
+} // {
+  watExtraOutput.machineFiles = machineFiles;
 }

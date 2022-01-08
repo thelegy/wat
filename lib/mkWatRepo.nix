@@ -41,10 +41,6 @@ let
       ++ (optionals (!dontLoadFlakeModules) (attrValues (flakes.self.nixosModules or {})))
     ;
 
-    machineArgs = name: {
-      inherit flakes;
-      mkMachine = mkMachine { inherit flakes extraOverlays extraModules; } name;
-    };
 
   in fn {
 
@@ -65,7 +61,14 @@ let
         (filterAttrs (key: val: ! hasPrefix "." key && val == "directory"))
         attrNames
       ];
-    in genAttrs machineNames (name: import (dir + "/${name}") (machineArgs name));
+      loadMachine = name: let
+        path = dir + "/${name}";
+        machineArgs = {
+          inherit flakes;
+          mkMachine = mkMachine { inherit flakes extraOverlays extraModules; } { inherit name path; };
+        };
+      in import path machineArgs;
+    in genAttrs machineNames loadMachine;
 
   };
 

@@ -4,6 +4,7 @@ with self.lib;
 {
 
   wat-installer = import ./installer.nix flakes;
+  wat-machine-files = import ./machine-files.nix;
 
   wat-installer-lib = import ./installer-lib.nix;
 

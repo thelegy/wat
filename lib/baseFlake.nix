@@ -1,5 +1,7 @@
-{ self, nixpkgs, ... }:
+{ self, ... }:
 with self.lib;
+
+nixpkgs:
 with nixpkgs.lib;
 
 let

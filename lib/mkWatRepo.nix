@@ -1,8 +1,8 @@
-{ self, ... }:
+watFlakes@{ self, ... }:
 with self.lib;
 
 
-flakes@{ nixpkgs, ... }:
+flakes@{ nixpkgs ? watFlakes.nixpkgs, ... }:
 with nixpkgs.lib;
 
 fn:
@@ -52,7 +52,7 @@ let
         (filterAttrs (key: val: ! hasPrefix "." key && (hasSuffix ".nix" key || val == "directory")))
         attrNames
       ];
-    in listToAttrs (forEach moduleNames (name: mkModule {
+    in listToAttrs (forEach moduleNames (name: mkModule nixpkgs {
       path = dir + "/${name}";
       namespace = namespacePrefix ++ namespace;
     }));
@@ -85,5 +85,5 @@ in pipe repoGenFn [
   filterApplyDefaultArgs
   fix
   filterOutputs
-  (recursiveUpdate baseFlake)
+  (recursiveUpdate (baseFlake nixpkgs))
 ]

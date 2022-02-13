@@ -1,18 +1,15 @@
 { self, nixpkgs, ... }:
 with self.lib;
+with nixpkgs.lib;
 
+let
+  systems = platforms.linux;
+in rec {
 
-eachDefaultSystem (system: pkgs: rec {
+  packages = withPkgsFor systems nixpkgs [ self.overlay ] (pkgs: {
+    inherit (pkgs) wat-deploy-tools wat-deploy-tools-envrc;
+  });
 
-  systemOverlays = [ self.overlay ];
+  defaultPackage = genAttrs systems (system: packages.${system}.wat-deploy-tools);
 
-  packages = {
-    inherit (pkgs)
-      wat-deploy-tools
-      wat-deploy-tools-envrc
-      ;
-  };
-
-  defaultPackage = packages.wat-deploy-tools;
-
-})
+}

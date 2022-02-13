@@ -1,22 +1,11 @@
-flakes@{ self, nixpkgs, ... }:
-with nixpkgs.lib;
+flakes@{ self, ... }:
 
-nixpkgs.lib // rec {
+rec {
 
-  defaultSystems = platforms.linux;
+  withPkgsFor = systems: nixpkgs: overlays: fn: with nixpkgs.lib;
+    genAttrs systems (system: fn (import nixpkgs { inherit system overlays; }));
 
-  eachSystem = systems: fn: let
-    perSystem = acc: system: let
-      result = fn system pkgs;
-      overlays = result.systemOverlays or [];
-      pkgs = import nixpkgs { inherit system overlays; };
-      fn2 = x: key: if key == "systemOverlays" then x else x // {
-        ${key} = (x.${key} or {}) // { ${system} = result.${key}; };
-      };
-    in foldl' fn2 acc (attrNames result);
-  in foldl' perSystem {} systems;
-
-  eachDefaultSystem = eachSystem defaultSystems;
+  withPkgsForLinux = nixpkgs: withPkgsFor nixpkgs.lib.platforms.linux nixpkgs;
 
   baseFlake = import ./baseFlake.nix flakes;
   mkModule = import ./mkModule.nix flakes;

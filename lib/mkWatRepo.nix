@@ -3,6 +3,8 @@ with self.lib;
 
 
 flakes@{ nixpkgs, ... }:
+with nixpkgs.lib;
+
 fn:
 
 let

@@ -15,6 +15,7 @@ with self.lib;
 , system ? "x86_64-linux"
 , loadModules ? []
 }:
+with nixpkgs.lib;
 
 module:
 

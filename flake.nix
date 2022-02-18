@@ -8,10 +8,6 @@
 
     overlay = import ./pkgs flakes;
 
-    packages = lib.withPkgsForLinux nixpkgs [ overlay ] (pkgs: {
-      inherit (pkgs) wat-install-activation;
-    });
-
   };
 
 }

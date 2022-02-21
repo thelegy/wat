@@ -12,4 +12,6 @@ rec {
   mkMachine = import ./mkMachine.nix flakes;
   mkWatRepo = import ./mkWatRepo.nix flakes;
 
+  dependencyDagOfSubmodule = import ./dependencyDagOfSubmodule.nix;
+
 }

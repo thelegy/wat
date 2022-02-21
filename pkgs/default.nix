@@ -20,6 +20,15 @@ in {
   nixos-enter = callPackage ./nixos-enter.nix { inherit nixpkgs; };
   nixos-generate-config = callPackage ./nixos-generate-config.nix { inherit nixpkgs; };
 
+  wat-run-tests = tests:
+  let
+    testResults = runTests tests;
+  in
+    if length testResults > 0 then
+      traceSeqN 10 testResults (throw "At least one tests did not match its expected outcome")
+    else
+      final.emptyDirectory;
+
   wat-deploy-tools = symlinkJoin {
     name = "wat-deploy-tools";
     paths = [

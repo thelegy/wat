@@ -133,6 +133,35 @@ wat-run-tests {
     };
   });
 
+  testIgnoreDisabled = machineTest ({ config, ... }: {
+    imports = [ sampleOption ];
+    sample = {
+      a.value = 1;
+      b.value = 2;
+      b.enabled = false;
+      c.value = 3;
+    };
+    output = {
+      expr = map (x: x.value) (toOrderedList config.sample);
+      expected = [ 1 3 ];
+    };
+  });
+
+  testDisabledApplyOrderEffects = machineTest ({ config, ... }: {
+    imports = [ sampleOption ];
+    sample = {
+      a.value = 1;
+      b.value = 2;
+      b.after = [ "c" ];
+      b.before = [ "a" ];
+      b.enabled = false;
+      c.value = 3;
+    };
+    output = {
+      expr = map (x: x.value) (toOrderedList config.sample);
+      expected = [ 3 1 ];
+    };
+  });
 
 
 }

@@ -1,9 +1,5 @@
-{ self, ... }:
-with self.lib;
-
-nixpkgs:
-with nixpkgs.lib;
-
+lib:
+with lib;
 
 { path, name?null, namespace?[] }:
 

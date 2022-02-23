@@ -1,5 +1,5 @@
-nixpkgs:
-with nixpkgs.lib;
+lib:
+with lib;
 
 
 let

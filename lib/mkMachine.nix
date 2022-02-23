@@ -1,6 +1,4 @@
 { self, ... }:
-with self.lib;
-
 
 { flakes ? {}
 , extraOverlays ? []
@@ -15,7 +13,7 @@ with self.lib;
 , system ? "x86_64-linux"
 , loadModules ? []
 }:
-with nixpkgs.lib;
+with self.lib.bake nixpkgs.lib;
 
 module:
 
@@ -42,6 +40,7 @@ let
 
     _module.args = {
       inherit flakes availableModules;
+      watLib = self.lib.bake nixpkgs.lib;
     };
 
     nix.nixPath = [ "nixpkgs=${nixpkgs}" ];

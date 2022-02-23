@@ -4,12 +4,11 @@
 , system
 , watLib
 }:
-with lib;
+with watLib;
 
 let
 
-  dependencyDagOfSubmodule = watLib.dependencyDagOfSubmodule { inherit lib; };
-  toOrderedList = dependencyDagOfSubmodule.toOrderedList;
+  toOrderedList = types.dependencyDagOfSubmodule.toOrderedList;
 
   nixosSystem = import "${path}/nixos/lib/eval-config.nix";
 
@@ -23,7 +22,7 @@ let
 
   sampleOption = {
     options.sample = mkOption {
-      type = dependencyDagOfSubmodule {
+      type = types.dependencyDagOfSubmodule {
         options.value = mkOption {
           type = types.anything;
         };

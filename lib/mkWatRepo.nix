@@ -1,9 +1,7 @@
 watFlakes@{ self, ... }:
-with self.lib;
-
 
 flakes@{ nixpkgs ? watFlakes.nixpkgs, ... }:
-with nixpkgs.lib;
+with self.lib.bake nixpkgs.lib;
 
 fn:
 
@@ -52,7 +50,7 @@ let
         (filterAttrs (key: val: ! hasPrefix "." key && (hasSuffix ".nix" key || val == "directory")))
         attrNames
       ];
-    in listToAttrs (forEach moduleNames (name: mkModule nixpkgs {
+    in listToAttrs (forEach moduleNames (name: mkModule {
       path = dir + "/${name}";
       namespace = namespacePrefix ++ namespace;
     }));

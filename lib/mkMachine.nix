@@ -40,7 +40,7 @@ let
 
     _module.args = {
       inherit flakes availableModules;
-      watLib = self.lib.bake nixpkgs.lib;
+      watLib = self.lib.bake lib;
     };
 
     nix.nixPath = [ "nixpkgs=${nixpkgs}" ];

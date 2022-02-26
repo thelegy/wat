@@ -10,7 +10,7 @@ in {
   wat-deploy = callPackage ./deploy.nix {};
   wat-gather = callPackage ./wat-gather.nix { inherit wat; };
   wat-gather-script = callPackage ./gatherScript.nix {};
-  wat-install = callPackage ./wat-install.nix { inherit nixpkgs wat; };
+  wat-install = callPackage ./wat-install.nix {};
   wat-install-activation = callPackage ./wat-install-activation.nix {};
   wat-install-helpers = callPackage ./wat-install-helpers {};
   wat-update-envrc = callPackage ./update-envrc.nix {};

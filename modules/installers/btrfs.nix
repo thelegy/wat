@@ -107,18 +107,18 @@ in {
               systemLabel=${escapeShellArg cfg.systemLabel}
               hostname=${escapeShellArg hostname}
 
-              partitionTable=()
+              partitionId() echo ''${''${(kn)partitionTable}[(Ie)$1]}
+
+              typeset -A partitionTable
+              partitionTable=([99system]='type=linux, name="system"')
             '' ++ optional isEfi ''
               efiId=${escapeShellArg cfg.efiId}
 
-              partitionTable+='start=2048, size=512MiB, type=uefi, name="esp"'
-              espPartition=''${installDisk:A}$#partitionTable
+              partitionTable[0esp]='start=2048, size=512MiB, type=uefi, name="esp"'
             '' ++ optional isGrub ''
-              # Bios boot partition
-              partitionTable+="size=1MiB, type=21686148-6449-6E6F-744E-656564454649"
+              partitionTable[0bios]="size=1MiB, type=21686148-6449-6E6F-744E-656564454649"
             '' ++ singleton ''
-              partitionTable+="size="${escapeShellArg cfg.swapSize}', type=swap, name="swap"'
-              swapPartition=''${installDisk:A}$#partitionTable
+              partitionTable[10swap]="size="${escapeShellArg cfg.swapSize}', type=swap, name="swap"'
             ''
           );
         };
@@ -144,17 +144,18 @@ in {
           content = mkMerge (
             singleton ''
               echo Creating partition table
+              typeset -a partitionTableProcessed
+              for k in ''${(kn)partitionTable}; partitionTableProcessed+=($partitionTable[$k])
               ${pkgs.util-linux}/bin/sfdisk $installDisk <<EOF
                 label: gpt
-                ''${(pj:\n  :)partitionTable}
-                type=linux, name="system"
+                ''${(pj:\n  :)partitionTableProcessed}
               EOF
-              systemPartition=''${installDisk:A}$(( 1 + $#partitionTable ))
 
               echo Ensure partition table changes are known to the kernel
               ${pkgs.busybox}/bin/partprobe $installDisk
             '' ++ optional isEfi ''
               echo Create EFI partition
+              : ''${espPartition:=''${installDisk:A}$(partitionId 0esp)}
               ${pkgs.dosfstools}/bin/mkfs.fat -F32 -i $efiId -n ESP $espPartition
             ''
           );
@@ -165,10 +166,12 @@ in {
           content = mkMerge (
             singleton ''
               echo Setup swap
+              : ''${swapPartition:=''${installDisk:A}$(partitionId 10swap)}
               ${pkgs.util-linux}/bin/mkswap --label swap --uuid $swapUuid $swapPartition
               ${pkgs.util-linux}/bin/swapon $swapPartition
 
               echo Setup system partition
+              : ''${systemPartition:=''${installDisk:A}$(partitionId 99system)}
               ${pkgs.btrfsProgs}/bin/mkfs.btrfs --label $systemLabel --uuid $systemUuid $systemPartition
               ${pkgs.coreutils}/bin/mkdir -p /mnt
               mountOpts=(noatime)

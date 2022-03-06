@@ -99,9 +99,9 @@ in
         before = [ "partitionInner" ];
         content = mkMerge (
           optional isGrub ''
-              echo Create boot partition
-              : ''${bootPartition:=''${installDisk:A}$(partitionId 5boot)}
-              ${pkgs.dosfstools}/bin/mkfs.fat -F32 -i $bootId -n BOOT $bootPartition
+            echo Create boot partition
+            : ''${bootPartition:=''${installDisk:A}$(partitionId 5boot)}
+            ${pkgs.dosfstools}/bin/mkfs.fat -F32 -i $bootId -n BOOT $bootPartition
           '' ++ singleton ''
             echo Create LUKS cryptvol
             : ''${luksPartition:=''${installDisk:A}$(partitionId 99system)}

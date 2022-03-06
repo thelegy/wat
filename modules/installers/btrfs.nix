@@ -106,6 +106,7 @@ in {
               systemUuid=${escapeShellArg cfg.systemUuid}
               systemLabel=${escapeShellArg cfg.systemLabel}
               hostname=${escapeShellArg hostname}
+              swapSize=${escapeShellArg cfg.swapSize}
 
               partitionId() echo ''${''${(kn)partitionTable}[(Ie)$1]}
 
@@ -118,7 +119,7 @@ in {
             '' ++ optional isGrub ''
               partitionTable[0bios]="size=1MiB, type=21686148-6449-6E6F-744E-656564454649"
             '' ++ singleton ''
-              partitionTable[10swap]="size="${escapeShellArg cfg.swapSize}', type=swap, name="swap"'
+              partitionTable[10swap]="size=$swapSize, type=swap, name=\"swap\""
             ''
           );
         };

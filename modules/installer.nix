@@ -205,6 +205,7 @@ in {
             exit 1
           }
           echo ''${formatConfig:-} | ${localPkgs.nix-remote-run} $WAT_TARGET $FLAKE#nixosConfigurations.$machine.config.wat.build.installer.format.script
+          unset formatConfig
         '';
       };
       install = {

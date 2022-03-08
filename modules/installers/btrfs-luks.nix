@@ -23,9 +23,9 @@ in
         default = uuidgen { name = "system-luks"; };
       };
 
-      bootId = mkOption {
+      bootPartUuid = mkOption {
         type = types.str;
-        default = substring 0 8 (uuidgen { name = "boot"; });
+        default = uuidgen { name = "boot-part"; };
       };
 
     };
@@ -40,9 +40,7 @@ in
     };
 
     fileSystems."/boot" = mkIf isGrub {
-      device = let
-        id = toUpper ("${substring 0 4 cfg.bootId}-${substring 4 4 cfg.bootId}");
-      in "/dev/disk/by-uuid/${id}";
+      device = "/dev/disk/by-partuuid/${cfg.bootPartUuid}";
       fsType = "vfat";
     };
 
@@ -87,9 +85,11 @@ in
             vgName=vg_$hostname
             swapPartition=/dev/$vgName/swap
             systemPartition=/dev/$vgName/system
+
+            unset 'partitionTable[10swap]'
           '' ++ optional isGrub ''
-            partitionTable[5boot]='size=512MiB, type=linux, name="boot"'
-            bootId=${escapeShellArg cfg.bootId}
+            bootPartUuid=${escapeShellArg cfg.bootPartUuid}
+            partitionTable[5boot]="size=512MiB, type=linux, name=\"boot\", uuid=\"''${(q)bootPartUuid}\""
           ''
         );
       };
@@ -100,11 +100,11 @@ in
         content = mkMerge (
           optional isGrub ''
             echo Create boot partition
-            : ''${bootPartition:=''${installDisk:A}$(partitionId 5boot)}
-            ${pkgs.dosfstools}/bin/mkfs.fat -F32 -i $bootId -n BOOT $bootPartition
+            : ''${bootPartition:=/dev/disk/by-partuuid/$bootPartUuid}
+            ${pkgs.dosfstools}/bin/mkfs.fat -F32 -n BOOT $bootPartition
           '' ++ singleton ''
             echo Create LUKS cryptvol
-            : ''${luksPartition:=''${installDisk:A}$(partitionId 99system)}
+            : ''${luksPartition:=/dev/disk/by-partuuid/$systemPartUuid}
             ${pkgs.cryptsetup}/bin/cryptsetup --batch-mode --key-file <(echo -n $luksPassphrase) luksFormat --type luks2 --uuid $luksUuid $luksPartition
 
             echo Mounting LUKS cryptvol for the first time
@@ -125,9 +125,9 @@ in
         );
       };
 
-      mountBoot = {
+      mountBoot = mkIf isGrub {
         after = [ "partitionInner" ];
-        content = mkIf isGrub ''
+        content = ''
           echo Mount the boot partition
           ${pkgs.coreutils}/bin/mkdir -p /mnt/boot
           ${pkgs.util-linux}/bin/mount $bootPartition /mnt/boot

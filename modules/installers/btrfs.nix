@@ -184,15 +184,15 @@ in {
 
               echo Setup system partition
               : ''${systemPartition:=/dev/disk/by-partuuid/$systemPartUuid}
-              ${pkgs.btrfsProgs}/bin/mkfs.btrfs --label $systemLabel --uuid $systemUuid $systemPartition
+              ${pkgs.btrfs-progs}/bin/mkfs.btrfs --label $systemLabel --uuid $systemUuid $systemPartition
               ${pkgs.coreutils}/bin/mkdir -p /mnt
               mountOpts=(noatime)
             '' ++ optional cfg.installDiskIsSSD ''
               mountOpts+=(discard=async)
             '' ++ singleton ''
               ${pkgs.util-linux}/bin/mount -o ''${(j:,:)mountOpts} $systemPartition /mnt
-              ${pkgs.btrfsProgs}/bin/btrfs subvolume create /mnt/$hostname
-              ${pkgs.btrfsProgs}/bin/btrfs subvolume create /mnt/$hostname/nix
+              ${pkgs.btrfs-progs}/bin/btrfs subvolume create /mnt/$hostname
+              ${pkgs.btrfs-progs}/bin/btrfs subvolume create /mnt/$hostname/nix
               ${pkgs.util-linux}/bin/umount /mnt
 
               #echo Remount the system

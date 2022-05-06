@@ -28,7 +28,7 @@ in {
   };
 
   config = mkIf cfg.enable (mkMerge [
-    (import "${modulesPath}/profiles/qemu-guest.nix" {})
+    (import "${modulesPath}/profiles/qemu-guest.nix" { inherit config lib; })
     {
 
       wat.installer.btrfs = {

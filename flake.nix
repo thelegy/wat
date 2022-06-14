@@ -1,5 +1,10 @@
 {
 
+  inputs.dependencyDagOfSubmodule = {
+    url = github:thelegy/nix-dependencyDagOfSubmodule;
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
+
   outputs = flakes@{ nixpkgs, ... }: rec {
 
     lib = import ./lib flakes;

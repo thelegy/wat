@@ -2,11 +2,9 @@ flakes@{ self, ... }:
 
 let
 
-  needsLib = {
+  needsLib = lib: {
 
-    types.dependencyDagOfSubmodule = import ./dependencyDagOfSubmodule.nix;
-
-    mkModule = import ./mkModule.nix;
+    mkModule = import ./mkModule.nix lib;
 
   };
 
@@ -25,10 +23,9 @@ let
 
   bake = lib:
   let
-    applyRecursively = x: lib.mapAttrs (k: v: if lib.isFunction v then v x else applyRecursively x v);
     watLib = lib.foldl' (x: y: lib.recursiveUpdate x y) {} [
-      lib
-      (applyRecursively watLib needsLib)
+      (flakes.dependencyDagOfSubmodule.lib.bake lib)
+      (needsLib watLib)
       selfContained
     ];
   in watLib;

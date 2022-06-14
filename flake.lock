@@ -1,5 +1,25 @@
 {
   "nodes": {
+    "dependencyDagOfSubmodule": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1655242631,
+        "narHash": "sha256-GoB43hCj7wf/QL2J4afDsWQJZSAnRuNQi97uOWKryD8=",
+        "owner": "thelegy",
+        "repo": "nix-dependencyDagOfSubmodule",
+        "rev": "b565ef8f48c82955a1f46ecea56ff4ca06929ab8",
+        "type": "github"
+      },
+      "original": {
+        "owner": "thelegy",
+        "repo": "nix-dependencyDagOfSubmodule",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "narHash": "sha256-9riYZyVing7OQUUWELSojlbt9u0xDh0Xm5Eg8FQn0fc=",
@@ -13,6 +33,7 @@
     },
     "root": {
       "inputs": {
+        "dependencyDagOfSubmodule": "dependencyDagOfSubmodule",
         "nixpkgs": "nixpkgs"
       }
     }

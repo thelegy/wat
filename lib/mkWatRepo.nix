@@ -19,6 +19,9 @@ let
     namespacePrefix = [ "wat" ];
     namespace = [];
     repoUuid = null;
+
+    enableAutoBuildTargets = true;
+    extraBuildTargets = [];
   };
 
   repoGenFn = a: with a; let
@@ -41,8 +44,18 @@ let
       ++ (optionals (!dontLoadFlakeModules) (attrValues (flakes.self.nixosModules or {})))
     ;
 
+    baseFlakeArgs = {
+      inherit enableAutoBuildTargets extraBuildTargets;
+      inherit nixpkgs;
+      selfFlake = flakes.self;
+    };
 
-  in fn {
+    extraResults = {
+      outputs = baseFlake baseFlakeArgs;
+    };
+
+
+  in recursiveUpdate extraResults (fn {
 
     findModules = namespace: dir: let
       moduleNames = pipe dir [
@@ -70,7 +83,7 @@ let
       in import path machineArgs;
     in genAttrs machineNames loadMachine;
 
-  };
+  });
 
   filterApplyDefaultArgs = fn: r: fn (mapAttrs (key: val: attrByPath [key] val r) defaultArgs);
 
@@ -83,5 +96,5 @@ in pipe repoGenFn [
   filterApplyDefaultArgs
   fix
   filterOutputs
-  (recursiveUpdate (baseFlake nixpkgs))
+  #(recursiveUpdate (baseFlake baseFlakeArgs))
 ]

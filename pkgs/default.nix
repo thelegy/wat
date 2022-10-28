@@ -13,6 +13,7 @@ in {
   wat-install = callPackage ./wat-install.nix {};
   wat-install-activation = callPackage ./wat-install-activation.nix {};
   wat-install-helpers = callPackage ./wat-install-helpers {};
+  wat-prebuild-script = callPackage ./wat-prebuild-script.nix {};
   wat-update-envrc = callPackage ./update-envrc.nix {};
 
   nix-remote-run = callPackage ./nix-remote-run.nix {};

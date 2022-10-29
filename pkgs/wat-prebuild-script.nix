@@ -21,7 +21,7 @@ in writeScriptBin "wat-prebuild-script" ''
   buildTarget() {
     set +e
     target=$1
-    nix path-info $flake#$target >&- 2>&-
+    nix path-info --derivation $flake#$target >&- 2>&-
     if [[ $? != 0 ]] {
       echo "$target did not evaluate" >&2
       exit 2

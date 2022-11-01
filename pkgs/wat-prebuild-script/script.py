@@ -9,7 +9,7 @@ from subprocess import DEVNULL
 FLAKE = os.environ.get('FLAKE')
 TARGETS = os.environ.get('TARGETS').split(':')
 
-Result = Enum('Result', ['SUCCESS', 'BUILD_TIMEOUT', 'BUILD_FAIL', 'EVAL_TIMEOUT', 'EVAL_FAIL'], start=0)
+Result = Enum('Result', ['SUCCESS', 'BUILD_FAIL', 'BUILD_TIMEOUT', 'EVAL_FAIL', 'EVAL_TIMEOUT'], start=0)
 
 async def buildTarget(target):
     process = await asyncio.create_subprocess_exec(

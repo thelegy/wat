@@ -34,7 +34,7 @@ async def buildTarget(target):
         build_result = await asyncio.wait_for(process.wait(), 7200)
     except asyncio.exceptions.TimeoutError:
         return (target, Result,BUILD_TIMEOUT)
-    if eval_result != 0:
+    if build_result != 0:
         return (target, Result.BUILD_FAIL)
     return (target, Result.SUCCESS)
 

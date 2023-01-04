@@ -197,7 +197,7 @@ in {
       };
       format = {
         content = localPkgs: ''
-          ${localPkgs.nix-remote-run} -b lsblk $WAT_TARGET "${pkgs.path}#legacyPackages.$system.util-linux"
+          ${localPkgs.nix-remote-run} -b lsblk $WAT_TARGET "${pkgs.path}#legacyPackages.$system.util-linux.bin"
           echo "!!! This will WIPE THE WHOLE DISK. Please type the Hostname \"$machine\" to verify this and continue:" >&2
           read -r confirmation
           if [[ $confirmation != $machine ]] {

@@ -25,10 +25,19 @@ let
       moduleConfig = config;
       mkModule_ = { config, lib, ... }: let
         cfg = extractFromNamespace config;
-        baseOptions = liftToNamespace {enable = mkEnableOption "Enable the ${moduleName} config layer";};
+        baseOptions = liftToNamespace {enable = mkEnableOption "the ${moduleName} config layer";};
+        disableModule = segments: a:
+          if length segments <= 0
+          then throw "A module may never enable itself"
+          else
+            mapAttrs (k: v:
+              if k != head segments
+              then optionalAttrs cfg.enable v
+              else disableModule (tail segments) v
+            ) a;
       in {
         options = recursiveUpdate baseOptions (applyIfFunction options cfg);
-        config = mkIf cfg.enable (applyIfFunction moduleConfig cfg);
+        config = disableModule (moduleNamespace ++ ["enable"]) (applyIfFunction moduleConfig cfg);
       };
     in { imports = [ mkModule_ ]; };
 

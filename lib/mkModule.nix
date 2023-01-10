@@ -28,6 +28,8 @@ let
         baseOptions = liftToNamespace {enable = mkEnableOption "the ${moduleName} config layer";};
       in {
 
+        _file = path;
+
         options = recursiveUpdate baseOptions (applyIfFunction options cfg);
 
         #config = mkIf cfg.enable (applyIfFunction moduleConfig cfg);

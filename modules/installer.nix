@@ -227,7 +227,7 @@ in {
     wat.build.installer.launcher.script = genAttrs platforms.all (system: let
       localPkgs = import pkgs.path { inherit system; overlays = [ flakes.self.overlay ]; };
       fragments = types.dependencyDagOfSubmodule.toOrderedList cfg.installer.launcher.fragments;
-    in localPkgs.writeScriptBin "wat-installer-launcher-${hostname}" ''
+    in pkgs.writeScriptBin "wat-installer-launcher-${hostname}" ''
       #!${localPkgs.zsh}/bin/zsh
       set -euo pipefail
 

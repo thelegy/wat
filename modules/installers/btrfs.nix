@@ -164,7 +164,7 @@ in {
 
               echo Ensure partition table changes are known to the kernel
               ${pkgs.busybox}/bin/partprobe $installDisk
-              ${pkgs.udev}/bin/udevadm settle
+              ${pkgs.systemdMinimal}/bin/udevadm settle
             '' ++ optional isEfi ''
               echo Create EFI partition
               : ''${espPartition:=/dev/disk/by-partuuid/$efiPartUuid}

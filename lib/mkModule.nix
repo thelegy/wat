@@ -44,15 +44,24 @@ let
         # something this framework supports.
         config = let
           #disableModule : [string] -> arrtset -> attrset
-          disableModule = segments:
+          disableModule = segments: attrs:
             if length segments <= 0
             then throw "A module may never enable itself"
             else
-              mapAttrs (k: v:
-                if k != head segments
-                then mkMerge (optional cfg.enable v)
-                else disableModule (tail segments) v
-              );
+              if (attrs ? _type)
+              then
+                if (attrs ? content)
+                then (attrs // { content = disableModule segments attrs.content; })
+                else
+                  if (attrs ? contents)
+                  then (attrs // { contents = map (x: disableModule segments x) attrs.contents; })
+                  else throw "Don't know how to handle _type ${attrs._type}"
+              else
+                mapAttrs (k: v:
+                  if k != head segments
+                  then mkMerge (optional cfg.enable v)
+                  else disableModule (tail segments) v
+                ) attrs;
         in disableModule (moduleNamespace ++ ["enable"]) (applyIfFunction moduleConfig cfg);
 
       };

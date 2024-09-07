@@ -1,7 +1,7 @@
 {
 
   inputs.dependencyDagOfSubmodule = {
-    url = github:thelegy/nix-dependencyDagOfSubmodule;
+    url = "github:thelegy/nix-dependencyDagOfSubmodule";
     inputs.nixpkgs.follows = "nixpkgs";
   };
 

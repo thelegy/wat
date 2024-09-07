@@ -10,9 +10,10 @@ with nixpkgs.lib;
 
 let
   systems = platforms.linux;
-in rec {
+  overlays = (toList (self.overlay or [])) ++ (toList (self.overlays.default or []));
+in {
 
-  packages = withPkgsFor systems nixpkgs [ self.overlay ] (pkgs: rec {
+  packages = withPkgsFor systems nixpkgs overlays (pkgs: rec {
     inherit (pkgs) wat-deploy-tools wat-deploy-tools-envrc;
     prebuild-script = pkgs.wat-prebuild-script.override {
       inherit enableAutoBuildTargets extraBuildTargets selfFlake;

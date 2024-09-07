@@ -35,7 +35,9 @@ let
 
     extraOverlays = loadOverlays
       ++ (optionals (!dontLoadFlakeOverlay) (toList (flakes.self.overlay or [])))
+      ++ (optionals (!dontLoadFlakeOverlay) (toList (flakes.self.overlays.default or [])))
       ++ (optionals (!dontLoadWatOverlay) (toList (self.overlay or [])))
+      ++ (optionals (!dontLoadWatOverlay) (toList (self.overlays.default or [])))
     ;
 
     extraModules = loadModules

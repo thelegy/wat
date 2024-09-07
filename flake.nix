@@ -11,9 +11,9 @@
 
     nixosModules = import ./modules flakes;
 
-    overlay = import ./pkgs flakes;
+    overlays.default = import ./pkgs flakes;
 
-    checks = lib.withPkgsFor [ "x86_64-linux" ] nixpkgs [ overlay ] (import ./checks flakes);
+    checks = lib.withPkgsFor [ "x86_64-linux" ] nixpkgs [ overlays.default ] (import ./checks flakes);
 
   };
 

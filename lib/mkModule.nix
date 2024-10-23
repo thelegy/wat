@@ -1,7 +1,7 @@
 lib:
 with lib;
 
-{ path, name?null, namespace?[] }:
+{ path, name?null, namespace?[], autoLift?true }:
 
 let
 
@@ -21,7 +21,7 @@ let
 
     extractFromNamespace = o: foldl (a: b: a."${b}") o moduleNamespace;
 
-    mkModule = { options?{}, config }: let
+    mkModule = { options?{}, config, dontAutoLift?(!autoLift) }: let
       moduleConfig = config;
       mkModule_ = { config, lib, ... }: let
         cfg = extractFromNamespace config;
@@ -30,7 +30,8 @@ let
 
         _file = path;
 
-        options = recursiveUpdate baseOptions (applyIfFunction options cfg);
+        options = recursiveUpdate baseOptions (applyIfFunction
+          (if dontAutoLift then options else liftToNamespace options) cfg);
 
         #config = mkIf cfg.enable (applyIfFunction moduleConfig cfg);
         # `mkIf` has the drawback, that it could get pushed down into not

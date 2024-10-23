@@ -225,7 +225,10 @@ in {
     };
 
     wat.build.installer.launcher.script = genAttrs platforms.all (system: let
-      localPkgs = import pkgs.path { inherit system; overlays = [ flakes.self.overlay ]; };
+      localPkgs = import pkgs.path {
+        inherit system;
+        overlays = (toList (flakes.self.overlay or [])) ++ (toList (flakes.self.overlays.default or []));
+      };
       fragments = types.dependencyDagOfSubmodule.toOrderedList cfg.installer.launcher.fragments;
     in pkgs.writeScriptBin "wat-installer-launcher-${hostname}" ''
       #!${localPkgs.zsh}/bin/zsh

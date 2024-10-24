@@ -54,10 +54,8 @@ in {
             "fe80::1"
           ];
           addresses = optional (!isNull cfg.ipv4Address) {
-            addressConfig = {
-              Address = cfg.ipv4Address;
-              Peer = "172.31.1.1";
-            };
+            Address = cfg.ipv4Address;
+            Peer = "172.31.1.1";
           };
         };
       };

@@ -214,7 +214,7 @@ in {
           system_installable=".#nixosConfigurations.$machine.config.system.build.toplevel"
 
           echo Evaluate target system configuration
-          ${localPkgs.nix-with-flakes} path-info --json $system_installable | ${localPkgs.jq}/bin/jq --raw-output ".[0].path" | read nixos_config_path
+          ${localPkgs.nix-with-flakes} path-info --json $system_installable | ${localPkgs.jq}/bin/jq --raw-output ".[0]?.path // keys[0]" | read nixos_config_path
 
           echo Copy target system
           ${localPkgs.nix-with-flakes} copy --substitute-on-destination --to "ssh://$WAT_TARGET?remote-store=/mnt" $system_installable

@@ -59,7 +59,7 @@ let
 
   in recursiveUpdate extraResults (fn {
 
-    findModules = namespace: dir: let
+    findModules = namespace: dir: {autoLift?false}: let
       moduleNames = pipe dir [
         builtins.readDir
         (filterAttrs (key: val: ! hasPrefix "." key && (hasSuffix ".nix" key || val == "directory")))
@@ -68,6 +68,7 @@ let
     in listToAttrs (forEach moduleNames (name: mkModule {
       path = dir + "/${name}";
       namespace = namespacePrefix ++ namespace;
+      autoLift = autoLift;
     }));
 
     findMachines = dir: let

@@ -1,6 +1,6 @@
-{ writeShellScript, nixFlakes }:
+{ writeShellScript, nixVersions }:
 
 writeShellScript "nix" ''
 
-  ${nixFlakes}/bin/nix --log-format bar-with-logs --experimental-features "nix-command flakes" "$@"
+  ${nixVersions.stable}/bin/nix --log-format bar-with-logs --experimental-features "nix-command flakes" "$@"
 ''

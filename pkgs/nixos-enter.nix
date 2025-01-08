@@ -5,6 +5,7 @@
 , systemd
 , nixpkgs
 , system
+, nixos-enter ? null
 }: with lib;
 
 let
@@ -14,7 +15,9 @@ let
     system = system;
   };
 
+  unwrapped-enter = if isNull nixos-enter then configuration.pkgs.nixos-enter else nixos-enter;
+
 in writeShellScriptBin "nixos-enter" ''
   export PATH=${coreutils}/bin:${util-linux}/bin:${systemd}/bin:$PATH
-  ${configuration.pkgs.nixos-enter}/bin/nixos-enter "$@"
+  ${unwrapped-enter}/bin/nixos-enter "$@"
 ''

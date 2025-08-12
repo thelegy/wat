@@ -28,7 +28,9 @@ writeScriptBin "deploy" ''
   source ${./util.zsh}
 
   usage() {
-    print "Usage: $cmdname <hostname> [switch|boot|reboot|test|dry-activate|build|iso|sdcard]" >&2
+    print "Usage: $cmdname <operation> <hostname>" >&2
+    print "" >&2
+    print "Operations: switch|boot|reboot|test|dry-activate|build|iso|sdcard" >&2
   }
 
   positional=()
@@ -46,21 +48,15 @@ writeScriptBin "deploy" ''
     shift
   done
 
-  if [[ ''${#positional[@]} -ne 1 && ''${#positional[@]} -ne 2 ]]
+  if [[ ''${#positional[@]} -ne 2 ]]
   then
     print "Invalid number of arguments." >&2
     usage
     exit 2
   fi
 
-  readonly hostname="''${positional[1]}"
-  if [[ ''${#positional[@]} -ge 2 ]]
-  then
-    readonly original_operation="''${positional[2]}"
-  else
-    # default operation
-    readonly original_operation=switch
-  fi
+  readonly original_operation="''${positional[1]}"
+  readonly hostname="''${positional[2]}"
 
   readonly nix_options=(--log-format bar-with-logs)
   operation=$original_operation

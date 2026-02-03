@@ -7,13 +7,13 @@
 
   outputs = flakes@{ nixpkgs, ... }: rec {
 
-    lib = import ./lib flakes;
+    lib = import ./nix/lib flakes;
 
-    nixosModules = import ./modules flakes;
+    nixosModules = import ./nix/modules flakes;
 
-    overlays.default = import ./pkgs flakes;
+    overlays.default = import ./nix/overlay flakes;
 
-    checks = lib.withPkgsFor [ "x86_64-linux" ] nixpkgs [ overlays.default ] (import ./checks flakes);
+    checks = lib.withPkgsFor [ "x86_64-linux" ] nixpkgs [ overlays.default ] (import ./nix/checks flakes);
 
   };
 

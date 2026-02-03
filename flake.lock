@@ -7,11 +7,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1655242631,
-        "narHash": "sha256-GoB43hCj7wf/QL2J4afDsWQJZSAnRuNQi97uOWKryD8=",
+        "lastModified": 1656615370,
+        "narHash": "sha256-IZDqz1aSySoqf1qtVQg+oJMHfC4IlT55Zoa7EkjvPug=",
         "owner": "thelegy",
         "repo": "nix-dependencyDagOfSubmodule",
-        "rev": "b565ef8f48c82955a1f46ecea56ff4ca06929ab8",
+        "rev": "98eb563d80b35acafbfc1abb9ccee569c1efb19c",
         "type": "github"
       },
       "original": {
@@ -20,10 +20,47 @@
         "type": "github"
       }
     },
+    "flake-parts": {
+      "inputs": {
+        "nixpkgs-lib": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1769996383,
+        "narHash": "sha256-AnYjnFWgS49RlqX7LrC4uA+sCCDBj0Ry/WOJ5XWAsa0=",
+        "owner": "hercules-ci",
+        "repo": "flake-parts",
+        "rev": "57928607ea566b5db3ad13af0e57e921e6b12381",
+        "type": "github"
+      },
+      "original": {
+        "owner": "hercules-ci",
+        "repo": "flake-parts",
+        "type": "github"
+      }
+    },
+    "import-tree": {
+      "locked": {
+        "lastModified": 1763762820,
+        "narHash": "sha256-ZvYKbFib3AEwiNMLsejb/CWs/OL/srFQ8AogkebEPF0=",
+        "owner": "vic",
+        "repo": "import-tree",
+        "rev": "3c23749d8013ec6daa1d7255057590e9ca726646",
+        "type": "github"
+      },
+      "original": {
+        "owner": "vic",
+        "repo": "import-tree",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
       "locked": {
-        "narHash": "sha256-9riYZyVing7OQUUWELSojlbt9u0xDh0Xm5Eg8FQn0fc=",
-        "path": "/nix/store/ldx6mi3dk80pshjhlmw5ziynh3jln8nd-source",
+        "lastModified": 1766651565,
+        "narHash": "sha256-QEhk0eXgyIqTpJ/ehZKg9IKS7EtlWxF3N7DXy42zPfU=",
+        "path": "/nix/store/0lc6kbmhkqk8vmgflpn2n1d1qb3vl2f5-source",
+        "rev": "3e2499d5539c16d0d173ba53552a4ff8547f4539",
         "type": "path"
       },
       "original": {
@@ -34,6 +71,8 @@
     "root": {
       "inputs": {
         "dependencyDagOfSubmodule": "dependencyDagOfSubmodule",
+        "flake-parts": "flake-parts",
+        "import-tree": "import-tree",
         "nixpkgs": "nixpkgs"
       }
     }

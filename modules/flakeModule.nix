@@ -1,120 +1,115 @@
 { self, ... }:
 {
+  config,
+  flake-parts-lib,
+  inputs,
+  lib,
+  ...
+}:
+{
 
-  flake.flakeModules.default =
-    {
-      config,
-      flake-parts-lib,
-      inputs,
-      lib,
-      ...
-    }:
-    {
+  options.wat = {
+    namespace = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+    };
+    namespacePrefix = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ "wat" ];
+    };
+    repoUuid = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+    };
 
-      options.wat = flake-parts-lib.mkSubmoduleOptions {
-        namespace = lib.mkOption {
-          type = lib.types.listOf lib.types.str;
-        };
-        namespacePrefix = lib.mkOption {
-          type = lib.types.listOf lib.types.str;
-          default = [ "wat" ];
-        };
-        repoUuid = lib.mkOption {
-          type = lib.types.nullOr lib.types.str;
-          default = null;
-        };
+    dontLoadFlakeModules = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+    };
+    dontLoadWatModules = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+    };
+    loadModules = lib.mkOption {
+      type = lib.types.listOf lib.types.deferredModule;
+      default = [ ];
+    };
 
-        dontLoadFlakeModules = lib.mkOption {
-          type = lib.types.bool;
-          default = false;
-        };
-        dontLoadWatModules = lib.mkOption {
-          type = lib.types.bool;
-          default = false;
-        };
-        loadModules = lib.mkOption {
-          type = lib.types.listOf lib.types.deferredModule;
-          default = [ ];
-        };
+    dontLoadFlakeOverlay = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+    };
+    dontLoadWatOverlay = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+    };
+    loadOverlays = lib.mkOption {
+      type = lib.types.listOf lib.types.anything;
+      default = [ ];
+    };
 
-        dontLoadFlakeOverlay = lib.mkOption {
-          type = lib.types.bool;
-          default = false;
-        };
-        dontLoadWatOverlay = lib.mkOption {
-          type = lib.types.bool;
-          default = false;
-        };
-        loadOverlays = lib.mkOption {
-          type = lib.types.listOf lib.types.anything;
-          default = [ ];
-        };
+    enableAutoBuildTargets = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+    };
+    extraBuildTargets = lib.mkOption {
+      type = lib.types.listOf lib.types.path;
+      default = [ ];
+    };
 
-        enableAutoBuildTargets = lib.mkOption {
-          type = lib.types.bool;
-          default = true;
-        };
-        extraBuildTargets = lib.mkOption {
-          type = lib.types.listOf lib.types.path;
-          default = [ ];
-        };
+    outputs = lib.mkOption {
+      type = lib.types.functionTo lib.types.attrs;
+    };
+  };
 
-        outputs = lib.mkOption {
-          type = lib.types.functionTo lib.types.attrs;
-        };
-      };
+  config =
+    let
 
-      config =
-        let
+      cfg = config.wat;
 
-          cfg = config.wat;
-
-          watFlake = self.lib.mkWatRepo inputs (
-            {
-              findModules,
-              findMachines,
-              ...
-            }:
-            {
-              inherit (cfg)
-                namespace
-                namespacePrefix
-                repoUuid
-                dontLoadFlakeModules
-                dontLoadWatModules
-                loadModules
-                dontLoadFlakeOverlay
-                dontLoadWatOverlay
-                loadOverlays
-                enableAutoBuildTargets
-                extraBuildTargets
-                ;
-              outputs = (
-                cfg.outputs {
-                  findModules = findModules cfg.namespace;
-                  inherit findMachines;
-                }
-              );
+      watFlake = self.lib.mkWatRepo inputs (
+        {
+          findModules,
+          findMachines,
+          ...
+        }:
+        {
+          inherit (cfg)
+            namespace
+            namespacePrefix
+            repoUuid
+            dontLoadFlakeModules
+            dontLoadWatModules
+            loadModules
+            dontLoadFlakeOverlay
+            dontLoadWatOverlay
+            loadOverlays
+            enableAutoBuildTargets
+            extraBuildTargets
+            ;
+          outputs = (
+            cfg.outputs {
+              findModules = findModules cfg.namespace;
+              inherit findMachines;
             }
           );
+        }
+      );
 
-        in
+    in
+    {
+
+      flake = {
+        inherit (watFlake) nixosConfigurations nixosModules;
+        overlays.default = watFlake.overlay;
+      };
+
+      perSystem =
+        { system, ... }:
         {
-
-          flake = {
-            inherit (watFlake) nixosConfigurations nixosModules;
-            overlays.default = watFlake.overlay;
+          devShells.default = watFlake.devShells.${system}.default;
+          packages = {
+            inherit (watFlake.packages.${system}) default prebuild-script wat-deploy-tools;
           };
-
-          perSystem =
-            { system, ... }:
-            {
-              devShells.default = watFlake.devShells.${system}.default;
-              packages = {
-                inherit (watFlake.packages.${system}) default prebuild-script wat-deploy-tools;
-              };
-            };
-
         };
 
     };

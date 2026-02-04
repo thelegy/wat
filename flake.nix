@@ -1,15 +1,8 @@
 {
 
-  outputs = inputs: inputs.flake-parts.lib.mkFlake { inherit inputs; } (inputs.import-tree ./modules);
+  outputs = inputs: import ./modules inputs;
 
   inputs.nixpkgs = {};
-
-  inputs.flake-parts = {
-    inputs.nixpkgs-lib.follows = "nixpkgs";
-    url = "github:hercules-ci/flake-parts";
-  };
-  inputs.import-tree.url = "github:vic/import-tree";
-  inputs.flake-aspects.url = "github:vic/flake-aspects";
 
   inputs.dependencyDagOfSubmodule = {
     url = "github:thelegy/nix-dependencyDagOfSubmodule";

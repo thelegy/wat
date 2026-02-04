@@ -8,8 +8,8 @@
     inputs.nixpkgs-lib.follows = "nixpkgs";
     url = "github:hercules-ci/flake-parts";
   };
-
   inputs.import-tree.url = "github:vic/import-tree";
+  inputs.flake-aspects.url = "github:vic/flake-aspects";
 
   inputs.dependencyDagOfSubmodule = {
     url = "github:thelegy/nix-dependencyDagOfSubmodule";

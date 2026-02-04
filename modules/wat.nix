@@ -6,6 +6,10 @@
     "aarch64-linux"
   ];
 
+  imports = [
+    inputs.flake-aspects.flakeModule
+  ];
+
   flake = {
 
     lib = import ../nix/lib inputs;

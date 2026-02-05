@@ -1,4 +1,4 @@
-{ self, ... }:
+toplevel@{ self, ... }:
 {
   config,
   flake-parts-lib,
@@ -7,6 +7,10 @@
   ...
 }:
 {
+
+  imports = [
+    (import ./tooling.nix toplevel)
+  ];
 
   options.wat = {
     namespace = lib.mkOption {
@@ -47,21 +51,12 @@
       default = [ ];
     };
 
-    enableAutoBuildTargets = lib.mkOption {
-      type = lib.types.bool;
-      default = true;
-    };
-    extraBuildTargets = lib.mkOption {
-      type = lib.types.listOf lib.types.path;
-      default = [ ];
-    };
-
     outputs = lib.mkOption {
       type = lib.types.functionTo lib.types.attrs;
     };
   };
 
-  config =
+  config.flake =
     let
 
       cfg = config.wat;
@@ -79,8 +74,6 @@
               dontLoadFlakeOverlay
               dontLoadWatOverlay
               loadOverlays
-              enableAutoBuildTargets
-              extraBuildTargets
               ;
           }
           (
@@ -97,21 +90,8 @@
 
     in
     {
-
-      flake = {
-        inherit (watFlake) nixosConfigurations nixosModules;
-        overlays.default = watFlake.overlay;
-      };
-
-      perSystem =
-        { system, ... }:
-        {
-          devShells.default = watFlake.devShells.${system}.default;
-          packages = {
-            inherit (watFlake.packages.${system}) default prebuild-script wat-deploy-tools;
-          };
-        };
-
+      inherit (watFlake) nixosConfigurations nixosModules;
+      overlays.default = watFlake.overlay;
     };
 
 }

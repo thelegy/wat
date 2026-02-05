@@ -17,9 +17,6 @@ flakes@{
   namespacePrefix ? [ "wat" ],
   namespace ? [ ],
   repoUuid ? null,
-
-  enableAutoBuildTargets ? true,
-  extraBuildTargets ? [ ],
 }:
 
 outputsFn:
@@ -53,16 +50,8 @@ let
     ++ (lib.optionals (!dontLoadWatModules) [ repoUuidModule ])
     ++ (lib.optionals (!dontLoadFlakeModules) (lib.attrValues (flakes.self.nixosModules or { })));
 
-  baseFlakeArgs = {
-    inherit enableAutoBuildTargets extraBuildTargets;
-    inherit nixpkgs;
-    selfFlake = flakes.self;
-  };
-
-  extraResults = self.lib.baseFlake baseFlakeArgs;
-
 in
-lib.recursiveUpdate extraResults (outputsFn {
+outputsFn {
 
   findModules =
     namespace: dir:
@@ -107,4 +96,4 @@ lib.recursiveUpdate extraResults (outputsFn {
         import path machineArgs;
     in
     lib.genAttrs machineNames loadMachine;
-})
+}

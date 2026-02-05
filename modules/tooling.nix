@@ -1,0 +1,51 @@
+{ self, ... }:
+{
+  config,
+  inputs,
+  lib,
+  ...
+}:
+
+let
+  cfg = config.wat;
+in
+{
+
+  options.wat = {
+    enableAutoBuildTargets = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+    };
+    extraBuildTargets = lib.mkOption {
+      type = lib.types.listOf lib.types.path;
+      default = [ ];
+    };
+  };
+
+  config.perSystem =
+    { system, ... }:
+    let
+      pkgs = import inputs.nixpkgs {
+        inherit system;
+        overlays = [ self.overlays.default ];
+      };
+    in
+    {
+
+      packages = {
+        inherit (pkgs) wat-deploy-tools;
+        prebuild-script = pkgs.wat-prebuild-script.override {
+          inherit (cfg) enableAutoBuildTargets extraBuildTargets;
+          selfFlake = self;
+        };
+      };
+
+      devShells.default = pkgs.mkShell {
+        packages = [
+          pkgs.wat-deploy-tools
+        ];
+      };
+
+    };
+
+}

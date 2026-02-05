@@ -1,5 +1,3 @@
-{ self, ... }:
-
 { flakes ? {}
 , extraOverlays ? []
 , extraModules ? []
@@ -13,43 +11,43 @@
 , system ? "x86_64-linux"
 , loadModules ? []
 }:
-with self.lib.bake nixpkgs.lib;
 
 module:
 
 let
 
+  lib = nixpkgs.lib;
+
   availableModules = extraModules ++ loadModules;
 
   lookupMachineFiles = dir: prefix: let
     dirContents = builtins.readDir (dir + "/${prefix}");
-    fileNames = attrNames dirContents;
+    fileNames = lib.attrNames dirContents;
     toFileList = key:
       if dirContents.${key} == "regular"
-        then singleton (nameValuePair (prefix + key) (dir + "/${prefix}${key}"))
+        then lib.singleton (lib.nameValuePair (prefix + key) (dir + "/${prefix}${key}"))
         else if dirContents.${key} == "directory"
           then lookupMachineFiles dir ("${prefix}${key}/")
           else [];
-    fileList = concatMap toFileList fileNames;
+    fileList = lib.concatMap toFileList fileNames;
   in fileList;
 
-  machineFiles = if isNull path then {} else listToAttrs (lookupMachineFiles path "");
+  machineFiles = if isNull path then {} else lib.listToAttrs (lookupMachineFiles path "");
 
   baseConfiguration = { config, lib, ... }: {
     nixpkgs.overlays = extraOverlays;
 
     _module.args = {
-      inherit flakes availableModules;
-      watLib = self.lib.bake lib;
+      inherit flakes;
     };
 
     nix.nixPath = [ "nixpkgs=${nixpkgs}" ];
     nix.registry.nixpkgs.flake = nixpkgs;
     nix.registry.n.flake = nixpkgs;
-    networking.hostName = mkDefault name;
+    networking.hostName = lib.mkDefault name;
   };
 
-in nixpkgs.lib.nixosSystem {
+in lib.nixosSystem {
   inherit system;
   modules = availableModules ++ [ baseConfiguration module ];
 } // {

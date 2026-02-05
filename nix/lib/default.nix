@@ -4,7 +4,7 @@ let
 
   needsLib = lib: {
 
-    mkModule = import ./mkModule.nix lib;
+    wrapModules = import ./mkModule.nix lib;
 
   };
 
@@ -16,7 +16,7 @@ let
     withPkgsForLinux = nixpkgs: withPkgsFor nixpkgs.lib.platforms.linux nixpkgs;
 
     baseFlake = import ./baseFlake.nix flakes;
-    mkMachine = import ./mkMachine.nix flakes;
+    mkMachine = import ./mkMachine.nix;
     mkWatRepo = import ./mkWatRepo.nix flakes;
 
   };

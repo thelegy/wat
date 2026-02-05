@@ -1,5 +1,4 @@
-flakes@{ self, ... }:
-with self.lib;
+flakes:
 
 {
 

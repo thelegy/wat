@@ -66,34 +66,34 @@
 
       cfg = config.wat;
 
-      watFlake = self.lib.mkWatRepo inputs (
-        {
-          findModules,
-          findMachines,
-          ...
-        }:
-        {
-          inherit (cfg)
-            namespace
-            namespacePrefix
-            repoUuid
-            dontLoadFlakeModules
-            dontLoadWatModules
-            loadModules
-            dontLoadFlakeOverlay
-            dontLoadWatOverlay
-            loadOverlays
-            enableAutoBuildTargets
-            extraBuildTargets
-            ;
-          outputs = (
+      watFlake =
+        self.lib.mkWatRepo inputs
+          {
+            inherit (cfg)
+              namespace
+              namespacePrefix
+              repoUuid
+              dontLoadFlakeModules
+              dontLoadWatModules
+              loadModules
+              dontLoadFlakeOverlay
+              dontLoadWatOverlay
+              loadOverlays
+              enableAutoBuildTargets
+              extraBuildTargets
+              ;
+          }
+          (
+            {
+              findModules,
+              findMachines,
+              ...
+            }:
             cfg.outputs {
               findModules = findModules cfg.namespace;
               inherit findMachines;
             }
           );
-        }
-      );
 
     in
     {

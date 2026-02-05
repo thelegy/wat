@@ -1,102 +1,110 @@
 watFlakes@{ self, ... }:
 
-flakes@{ nixpkgs ? watFlakes.nixpkgs, ... }:
-with self.lib.bake nixpkgs.lib;
+flakes@{
+  nixpkgs ? watFlakes.nixpkgs,
+  ...
+}:
 
-fn:
+{
+  dontLoadFlakeModules ? false,
+  dontLoadWatModules ? false,
+  loadModules ? [ ],
+
+  dontLoadFlakeOverlay ? false,
+  dontLoadWatOverlay ? false,
+  loadOverlays ? [ ],
+
+  namespacePrefix ? [ "wat" ],
+  namespace ? [ ],
+  repoUuid ? null,
+
+  enableAutoBuildTargets ? true,
+  extraBuildTargets ? [ ],
+}:
+
+outputsFn:
 
 let
 
-  defaultArgs = {
-    dontLoadFlakeModules = false;
-    dontLoadWatModules = false;
-    loadModules = [];
+  lib = nixpkgs.lib;
 
-    dontLoadFlakeOverlay = false;
-    dontLoadWatOverlay = false;
-    loadOverlays = [];
+  repoUuidModule =
+    { wat-installer-lib, ... }:
+    {
+      wat.installer.repoUuid =
+        if !isNull repoUuid then
+          repoUuid
+        else
+          (lib.foldl' (
+            namespace: name: wat-installer-lib.uuidgen { inherit namespace name; }
+          ) "59d93334-df87-4242-ac91-9c48886b4d94" namespace);
+    };
 
-    namespacePrefix = [ "wat" ];
-    namespace = [];
-    repoUuid = null;
+  extraOverlays =
+    loadOverlays
+    ++ (lib.optionals (!dontLoadFlakeOverlay) (lib.toList (flakes.self.overlay or [ ])))
+    ++ (lib.optionals (!dontLoadFlakeOverlay) (lib.toList (flakes.self.overlays.default or [ ])))
+    ++ (lib.optionals (!dontLoadWatOverlay) (lib.toList (self.overlay or [ ])))
+    ++ (lib.optionals (!dontLoadWatOverlay) (lib.toList (self.overlays.default or [ ])));
 
-    enableAutoBuildTargets = true;
-    extraBuildTargets = [];
+  extraModules =
+    loadModules
+    ++ (lib.optionals (!dontLoadWatModules) (lib.attrValues self.nixosModules))
+    ++ (lib.optionals (!dontLoadWatModules) [ repoUuidModule ])
+    ++ (lib.optionals (!dontLoadFlakeModules) (lib.attrValues (flakes.self.nixosModules or { })));
+
+  baseFlakeArgs = {
+    inherit enableAutoBuildTargets extraBuildTargets;
+    inherit nixpkgs;
+    selfFlake = flakes.self;
   };
 
-  repoGenFn = a: with a; let
+  extraResults = self.lib.baseFlake baseFlakeArgs;
 
-    repoUuidModule = { wat-installer-lib, ... }: {
-      wat.installer.repoUuid = if !isNull repoUuid then repoUuid else (foldl'
-        (namespace: name: wat-installer-lib.uuidgen { inherit namespace name;})
-        "59d93334-df87-4242-ac91-9c48886b4d94"
-        namespace);
-    };
+in
+lib.recursiveUpdate extraResults (outputsFn {
 
-    extraOverlays = loadOverlays
-      ++ (optionals (!dontLoadFlakeOverlay) (toList (flakes.self.overlay or [])))
-      ++ (optionals (!dontLoadFlakeOverlay) (toList (flakes.self.overlays.default or [])))
-      ++ (optionals (!dontLoadWatOverlay) (toList (self.overlay or [])))
-      ++ (optionals (!dontLoadWatOverlay) (toList (self.overlays.default or [])))
-    ;
-
-    extraModules = loadModules
-      ++ (optionals (!dontLoadWatModules) (attrValues self.nixosModules))
-      ++ (optionals (!dontLoadWatModules) [repoUuidModule])
-      ++ (optionals (!dontLoadFlakeModules) (attrValues (flakes.self.nixosModules or {})))
-    ;
-
-    baseFlakeArgs = {
-      inherit enableAutoBuildTargets extraBuildTargets;
-      inherit nixpkgs;
-      selfFlake = flakes.self;
-    };
-
-    extraResults = {
-      outputs = baseFlake baseFlakeArgs;
-    };
-
-
-  in recursiveUpdate extraResults (fn {
-
-    findModules = namespace: dir: let
-      moduleNames = pipe dir [
+  findModules =
+    namespace: dir:
+    let
+      moduleNames = lib.pipe dir [
         builtins.readDir
-        (filterAttrs (key: val: ! hasPrefix "." key && (hasSuffix ".nix" key || val == "directory")))
-        attrNames
+        (lib.filterAttrs (
+          key: val: !lib.hasPrefix "." key && (lib.hasSuffix ".nix" key || val == "directory")
+        ))
+        lib.attrNames
       ];
-    in listToAttrs (forEach moduleNames (name: mkModule {
-      path = dir + "/${name}";
-      namespace = namespacePrefix ++ namespace;
-    }));
+    in
+    lib.listToAttrs (
+      lib.forEach moduleNames (
+        name:
+        (self.lib.bake lib).wrapModules {
+          path = dir + "/${name}";
+          namespace = namespacePrefix ++ namespace;
+        }
+      )
+    );
 
-    findMachines = dir: let
-      machineNames = pipe dir [
+  findMachines =
+    dir:
+    let
+      machineNames = lib.pipe dir [
         builtins.readDir
-        (filterAttrs (key: val: ! hasPrefix "." key && val == "directory"))
-        attrNames
+        (lib.filterAttrs (key: val: !lib.hasPrefix "." key && val == "directory"))
+        lib.attrNames
       ];
-      loadMachine = name: let
-        path = dir + "/${name}";
-        machineArgs = {
-          inherit flakes;
-          mkMachine = mkMachine { inherit flakes extraOverlays extraModules; } { inherit name path; };
-        };
-      in import path machineArgs;
-    in genAttrs machineNames loadMachine;
-
-  });
-
-  filterApplyDefaultArgs = fn: r: fn (mapAttrs (key: val: attrByPath [key] val r) defaultArgs);
-
-  filterOutputs = flip pipe [
-    (filterAttrs (key: val: !hasAttr key defaultArgs))
-    ({ outputs }: outputs)
-  ];
-
-in pipe repoGenFn [
-  filterApplyDefaultArgs
-  fix
-  filterOutputs
-  #(recursiveUpdate (baseFlake baseFlakeArgs))
-]
+      loadMachine =
+        name:
+        let
+          path = dir + "/${name}";
+          machineArgs = {
+            inherit flakes;
+            mkMachine = self.lib.mkMachine { inherit flakes extraOverlays extraModules; } {
+              inherit name path;
+            };
+          };
+        in
+        import path machineArgs;
+    in
+    lib.genAttrs machineNames loadMachine;
+})

@@ -3,7 +3,7 @@ inputs@{ ... }:
 
   flakeModules.default = import ./flakeModule.nix inputs;
 
-  lib = import ../nix/lib inputs;
+  lib = import ../nix/lib;
 
   nixosModules = import ../nix/modules inputs;
 

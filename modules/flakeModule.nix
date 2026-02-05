@@ -101,7 +101,7 @@ toplevel@{ self, ... }:
         lib.listToAttrs (
           lib.forEach moduleNames (
             name:
-            (self.lib.bake lib).wrapModules {
+            self.lib.wrapModules lib {
               path = dir + "/${name}";
               namespace = cfg.namespacePrefix ++ cfg.namespace;
             }

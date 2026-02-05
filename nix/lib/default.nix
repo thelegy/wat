@@ -16,7 +16,6 @@ let
     withPkgsForLinux = nixpkgs: withPkgsFor nixpkgs.lib.platforms.linux nixpkgs;
 
     mkMachine = import ./mkMachine.nix;
-    mkWatRepo = import ./mkWatRepo.nix flakes;
 
   };
 

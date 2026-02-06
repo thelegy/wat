@@ -1,4 +1,4 @@
-{ self, ... }:
+{ self, wat, ... }:
 {
   config,
   inputs,
@@ -48,7 +48,7 @@ let
           path = dir + "/${name}";
           machineArgs = {
             inherit flakes;
-            mkMachine = self.lib.mkMachine { inherit flakes extraOverlays extraModules; } {
+            mkMachine = wat.lib.mkMachine { inherit flakes extraOverlays extraModules; } {
               inherit name path;
             };
           };

@@ -1,6 +1,5 @@
 flakes:
 {
-  watLib,
   wat-installer-lib,
   config,
   pkgs,

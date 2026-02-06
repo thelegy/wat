@@ -1,12 +1,25 @@
 inputs@{ ... }:
-{
+let
 
-  flakeModules.default = import ./flakeModule.nix inputs;
+  toplevel = inputs // {
+    wat = {
+      inherit lib nixosModules overlays;
+    };
+  };
 
   lib = import ../nix/lib;
 
-  nixosModules = import ../nix/modules inputs;
+  flakeModules.default = import ./flakeModule.nix toplevel;
 
-  overlays.default = import ../nix/overlay inputs;
+  nixosModules = import ../nix/modules toplevel;
 
+  overlays.default = import ../nix/overlay toplevel;
+
+in
+{
+  inherit
+    flakeModules
+    nixosModules
+    overlays
+    ;
 }

@@ -13,7 +13,7 @@ let
 
   nixosModules = import ../nix/modules toplevel;
 
-  overlays.default = import ../nix/overlay toplevel;
+  overlays.default = import ./_overlay toplevel;
 
 in
 {

@@ -11,7 +11,7 @@ let
 
   flakeModules.default = import ./wat toplevel;
 
-  nixosModules = import ../nix/modules toplevel;
+  nixosModules = import ./_nixosModules toplevel;
 
   overlays.default = import ./_overlay toplevel;
 

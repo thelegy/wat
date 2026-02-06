@@ -7,9 +7,9 @@ let
     };
   };
 
-  lib = import ../nix/lib;
+  lib = import ./_lib;
 
-  flakeModules.default = import ./flakeModule.nix toplevel;
+  flakeModules.default = import ./wat toplevel;
 
   nixosModules = import ../nix/modules toplevel;
 

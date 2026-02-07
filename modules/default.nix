@@ -3,11 +3,9 @@ let
 
   toplevel = inputs // {
     wat = {
-      inherit lib nixosModules overlays;
+      inherit nixosModules overlays;
     };
   };
-
-  lib = import ./_lib;
 
   flakeModules.default = import ./wat toplevel;
 

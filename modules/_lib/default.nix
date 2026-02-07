@@ -1,5 +1,0 @@
-{
-
-  mkMachine = import ./mkMachine.nix;
-
-}

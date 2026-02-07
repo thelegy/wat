@@ -36,7 +36,7 @@ in
         inherit (pkgs) wat-deploy-tools;
         prebuild-script = pkgs.wat-prebuild-script.override {
           inherit (cfg) enableAutoBuildTargets extraBuildTargets;
-          selfFlake = self;
+          selfFlake = inputs.self;
         };
       };
 

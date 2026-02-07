@@ -1,5 +1,4 @@
-inputs:
-{ ... }:
+{ inputs, ... }:
 {
-  imports = [ (import ../modules inputs) ];
+  imports = [ (inputs.import-tree ../modules) ];
 }

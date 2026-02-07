@@ -1,4 +1,3 @@
-{ self, ... }:
 {
   config,
   inputs,
@@ -35,16 +34,16 @@ let
 
       extraOverlays =
         cfg.loadOverlays
-        ++ (lib.optionals (!cfg.dontLoadFlakeOverlay) (lib.toList (flakes.self.overlay or [ ])))
-        ++ (lib.optionals (!cfg.dontLoadFlakeOverlay) (lib.toList (flakes.self.overlays.default or [ ])))
-        ++ (lib.optionals (!cfg.dontLoadWatOverlay) (lib.toList (self.overlay or [ ])))
-        ++ (lib.optionals (!cfg.dontLoadWatOverlay) (lib.toList (self.overlays.default or [ ])));
+        ++ (lib.optionals (!cfg.dontLoadFlakeOverlay) (lib.toList (inputs.self.overlay or [ ])))
+        ++ (lib.optionals (!cfg.dontLoadFlakeOverlay) (lib.toList (inputs.self.overlays.default or [ ])))
+        ++ (lib.optionals (!cfg.dontLoadWatOverlay) (lib.toList (inputs.wat.overlay or [ ])))
+        ++ (lib.optionals (!cfg.dontLoadWatOverlay) (lib.toList (inputs.wat.overlays.default or [ ])));
 
       extraModules =
         cfg.loadModules
-        ++ (lib.optionals (!cfg.dontLoadWatModules) (lib.attrValues self.nixosModules))
+        ++ (lib.optionals (!cfg.dontLoadWatModules) (lib.attrValues inputs.wat.nixosModules))
         ++ (lib.optionals (!cfg.dontLoadWatModules) [ repoUuidModule ])
-        ++ (lib.optionals (!cfg.dontLoadFlakeModules) (lib.attrValues (flakes.self.nixosModules or { })));
+        ++ (lib.optionals (!cfg.dontLoadFlakeModules) (lib.attrValues (inputs.self.nixosModules or { })));
 
       availableModules = extraModules ++ loadModules;
 

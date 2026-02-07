@@ -1,17 +1,5 @@
-toplevel:
+{ lib, ... }:
 {
-  config,
-  flake-parts-lib,
-  inputs,
-  lib,
-  ...
-}:
-{
-
-  imports = [
-    (import ./lib toplevel)
-    (import ./tooling.nix toplevel)
-  ];
 
   options.wat = {
     namespace = lib.mkOption {

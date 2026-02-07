@@ -1,4 +1,3 @@
-{ self, ... }:
 {
   config,
   inputs,
@@ -27,7 +26,7 @@ in
     let
       pkgs = import inputs.nixpkgs {
         inherit system;
-        overlays = [ self.overlays.default ];
+        overlays = [ inputs.wat.overlays.default ];
       };
     in
     {

@@ -56,6 +56,10 @@ toplevel:
       type = lib.types.attrs;
     };
 
+    build = lib.mkOption {
+      type = lib.types.attrs;
+      internal = true;
+    };
   };
 
 }

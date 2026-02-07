@@ -1,4 +1,4 @@
-{ wat, ... }:
+{ ... }:
 { config, lib, ... }:
 let
   cfg = config.wat;
@@ -17,9 +17,8 @@ let
     lib.listToAttrs (
       lib.forEach moduleNames (
         name:
-        wat.lib.wrapModules lib {
+        cfg.build.wrapModule {
           path = dir + "/${name}";
-          namespace = cfg.namespacePrefix ++ cfg.namespace;
         }
       )
     );

@@ -1,6 +1,6 @@
 {
 
-  outputs = inputs: import ./modules inputs;
+  outputs = inputs: import ./nix inputs;
 
   inputs.nixpkgs = {};
 

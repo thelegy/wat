@@ -2,7 +2,6 @@
 {
   config,
   inputs,
-  lib,
   ...
 }:
 let
@@ -20,6 +19,7 @@ let
     }:
     module:
     let
+      lib = nixpkgs.lib;
 
       repoUuidModule =
         { wat-installer-lib, ... }:
@@ -83,7 +83,7 @@ let
         };
 
     in
-    lib.nixosSystem {
+    nixpkgs.lib.nixosSystem {
       inherit system;
       modules = availableModules ++ [
         baseConfiguration

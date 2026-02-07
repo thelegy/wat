@@ -1,17 +1,11 @@
 inputs@{ ... }:
 let
 
-  toplevel = inputs // {
-    wat = {
-      inherit nixosModules overlays;
-    };
-  };
+  flakeModules.default = import ./wat inputs;
 
-  flakeModules.default = import ./wat toplevel;
+  nixosModules = import ./_nixosModules inputs;
 
-  nixosModules = import ./_nixosModules toplevel;
-
-  overlays.default = import ./_overlay toplevel;
+  overlays.default = import ./_overlay inputs;
 
 in
 {

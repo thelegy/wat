@@ -5,7 +5,6 @@
 }:
 let
   cfg = config.wat;
-  flakes = inputs;
   wat.lib.mkMachine =
     {
       name,
@@ -19,33 +18,6 @@ let
     module:
     let
       lib = nixpkgs.lib;
-
-      repoUuidModule =
-        { wat-installer-lib, ... }:
-        {
-          wat.installer.repoUuid =
-            if !isNull cfg.repoUuid then
-              cfg.repoUuid
-            else
-              (lib.foldl' (
-                namespace: name: wat-installer-lib.uuidgen { inherit namespace name; }
-              ) "59d93334-df87-4242-ac91-9c48886b4d94" cfg.namespace);
-        };
-
-      extraOverlays =
-        cfg.loadOverlays
-        ++ (lib.optionals (!cfg.dontLoadFlakeOverlay) (lib.toList (inputs.self.overlay or [ ])))
-        ++ (lib.optionals (!cfg.dontLoadFlakeOverlay) (lib.toList (inputs.self.overlays.default or [ ])))
-        ++ (lib.optionals (!cfg.dontLoadWatOverlay) (lib.toList (inputs.wat.overlay or [ ])))
-        ++ (lib.optionals (!cfg.dontLoadWatOverlay) (lib.toList (inputs.wat.overlays.default or [ ])));
-
-      extraModules =
-        cfg.loadModules
-        ++ (lib.optionals (!cfg.dontLoadWatModules) (lib.attrValues inputs.wat.nixosModules))
-        ++ (lib.optionals (!cfg.dontLoadWatModules) [ repoUuidModule ])
-        ++ (lib.optionals (!cfg.dontLoadFlakeModules) (lib.attrValues (inputs.self.nixosModules or { })));
-
-      availableModules = extraModules ++ loadModules;
 
       lookupMachineFiles =
         dir: prefix:
@@ -64,17 +36,12 @@ let
         in
         fileList;
 
-      machineFiles = if isNull path then { } else lib.listToAttrs (lookupMachineFiles path "");
+      watExtraOutput.machineFiles =
+        if isNull path then { } else lib.listToAttrs (lookupMachineFiles path "");
 
       baseConfiguration =
         { config, lib, ... }:
         {
-          nixpkgs.overlays = extraOverlays;
-
-          _module.args = {
-            inherit flakes;
-          };
-
           nix.nixPath = [ "nixpkgs=${nixpkgs}" ];
           nix.registry.nixpkgs.flake = nixpkgs;
           nix.registry.n.flake = nixpkgs;
@@ -84,13 +51,14 @@ let
     in
     nixpkgs.lib.nixosSystem {
       inherit system;
-      modules = availableModules ++ [
+      modules = loadModules ++ [
+        cfg.lib.hostModule
         baseConfiguration
         module
       ];
     }
     // {
-      watExtraOutput.machineFiles = machineFiles;
+      inherit watExtraOutput;
     };
 in
 {

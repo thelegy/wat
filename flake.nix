@@ -2,7 +2,7 @@
 
   outputs = inputs: import ./nix inputs;
 
-  inputs.nixpkgs = {};
+  inputs.nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
 
   inputs.dependencyDagOfSubmodule = {
     url = "github:thelegy/nix-dependencyDagOfSubmodule";

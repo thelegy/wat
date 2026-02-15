@@ -39,7 +39,8 @@ in
         };
       };
 
-      devShells.default = pkgs.mkShell {
+      devShells.default = pkgs.mkShellNoCC {
+        name = "wat";
         packages = [
           pkgs.wat-deploy-tools
         ];

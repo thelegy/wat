@@ -8,7 +8,7 @@
   flake-file.inputs.git-hooks-nix.inputs.nixpkgs.follows = "nixpkgs";
 
   perSystem =
-    { config, ... }:
+    { config, pkgs, ... }:
     {
       pre-commit.settings = {
         rootSrc = lib.mkForce ../..;
@@ -18,6 +18,9 @@
         hooks.treefmt.enable = true;
       };
 
-      devShells.pre-commit = config.pre-commit.devShell;
+      devShells.pre-commit = pkgs.mkShellNoCC {
+        name = "wat-pre-commit";
+        inputsFrom = [ config.pre-commit.devShell ];
+      };
     };
 }

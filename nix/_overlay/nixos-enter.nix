@@ -3,14 +3,14 @@
   coreutils,
   util-linux,
   systemd,
-  nixpkgs,
+  path,
   system,
   nixos-enter ? null,
 }:
 
 let
 
-  configuration = import "${nixpkgs}/nixos/lib/eval-config.nix" {
+  configuration = import "${path}/nixos/lib/eval-config.nix" {
     modules = [ ];
     system = system;
   };

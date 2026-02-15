@@ -1,11 +1,11 @@
 {
-  nixpkgs,
+  pkgs,
   system,
 }:
 
 let
 
-  configuration = import "${nixpkgs}/nixos/lib/eval-config.nix" {
+  configuration = import "${pkgs}/nixos/lib/eval-config.nix" {
     modules = [ ];
     system = system;
   };

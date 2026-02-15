@@ -1,4 +1,4 @@
-{ self, nixpkgs, ... }:
+{ self, ... }:
 final: _prev:
 with final.lib;
 with final;
@@ -21,8 +21,8 @@ in
 
   nix-remote-run = callPackage ./nix-remote-run.nix { };
   nix-with-flakes = callPackage ./nix-with-flakes.nix { };
-  wat-nixos-enter = callPackage ./nixos-enter.nix { inherit nixpkgs; };
-  nixos-generate-config = callPackage ./nixos-generate-config.nix { inherit nixpkgs; };
+  wat-nixos-enter = callPackage ./nixos-enter.nix;
+  nixos-generate-config = callPackage ./nixos-generate-config.nix;
 
   wat-run-tests =
     tests:

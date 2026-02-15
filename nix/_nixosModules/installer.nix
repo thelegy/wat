@@ -11,7 +11,6 @@ let
 
   cfg = config.wat.build;
   hostname = config.networking.hostName;
-  noInstallerError = throw "No installation method was defined for machine \"${hostname}\"!";
 
   inherit (wat-installer-lib) uuidgen;
 
@@ -193,11 +192,15 @@ in
             usage() cat <<'EOF'
             ${lib.concatMapStringsSep "\n" (
               opt:
-              lib.concatStringsSep " " (lib.flatten [
-                "  -${opt.option}:"
-                (lib.optional (lib.length opt.aliases > 0) "(${lib.concatMapStringsSep ", " (x: "-" + x) opt.aliases})")
-                opt.help
-              ])
+              lib.concatStringsSep " " (
+                lib.flatten [
+                  "  -${opt.option}:"
+                  (lib.optional (lib.length opt.aliases > 0)
+                    "(${lib.concatMapStringsSep ", " (x: "-" + x) opt.aliases})"
+                  )
+                  opt.help
+                ]
+              )
             ) options}
             EOF
           '';
@@ -282,7 +285,8 @@ in
         let
           localPkgs = import pkgs.path {
             inherit system;
-            overlays = (lib.toList (flakes.self.overlay or [ ])) ++ (lib.toList (flakes.self.overlays.default or [ ]));
+            overlays =
+              (lib.toList (flakes.self.overlay or [ ])) ++ (lib.toList (flakes.self.overlays.default or [ ]));
           };
           fragments = lib.types.dependencyDagOfSubmodule.toOrderedList cfg.installer.launcher.fragments;
         in

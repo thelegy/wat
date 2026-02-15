@@ -1,9 +1,11 @@
-{ lib
-, wat-installer-lib
-, pkgs
-, config
-, ... }: with lib;
-
+{
+  lib,
+  wat-installer-lib,
+  pkgs,
+  config,
+  ...
+}:
+with lib;
 
 let
   cfg = config.wat.installer.btrfs.luks;
@@ -87,7 +89,8 @@ in
             systemPartition=/dev/$vgName/system
 
             unset 'partitionTable[10swap]'
-          '' ++ optional isGrub ''
+          ''
+          ++ optional isGrub ''
             bootPartUuid=${escapeShellArg cfg.bootPartUuid}
             partitionTable[5boot]="size=512MiB, type=linux, name=\"boot\", uuid=\"''${(q)bootPartUuid}\""
           ''
@@ -102,16 +105,19 @@ in
             echo Create boot partition
             : ''${bootPartition:=/dev/disk/by-partuuid/$bootPartUuid}
             ${pkgs.dosfstools}/bin/mkfs.fat -F32 -n BOOT $bootPartition
-          '' ++ singleton ''
+          ''
+          ++ singleton ''
             echo Create LUKS cryptvol
             : ''${luksPartition:=/dev/disk/by-partuuid/$systemPartUuid}
             ${pkgs.cryptsetup}/bin/cryptsetup --batch-mode --key-file <(echo -n $luksPassphrase) luksFormat --type luks2 --uuid $luksUuid $luksPartition
 
             echo Mounting LUKS cryptvol for the first time
             luksSsdOptions=()
-          '' ++ optional config.wat.installer.btrfs.installDiskIsSSD ''
+          ''
+          ++ optional config.wat.installer.btrfs.installDiskIsSSD ''
             luksSsdOptions=(--allow-discards --persistent)
-          '' ++ singleton ''
+          ''
+          ++ singleton ''
             ${pkgs.cryptsetup}/bin/cryptsetup --batch-mode --key-file <(echo -n $luksPassphrase) $luksSsdOptions open $luksPartition $luksVolName
             unset luksPassphrase
 

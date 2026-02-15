@@ -1,4 +1,8 @@
-{ writeScript, zsh, nix-with-flakes }:
+{
+  writeScript,
+  zsh,
+  nix-with-flakes,
+}:
 
 writeScript "nix-remote-run" ''
   #!${zsh}/bin/zsh

@@ -1,21 +1,24 @@
-{ lib
-, wat-installer-lib
-, pkgs
-, config
-, ... }: with lib;
+{
+  lib,
+  wat-installer-lib,
+  pkgs,
+  config,
+  ...
+}:
+with lib;
 
 let
 
   cfg = config.wat.installer.btrfs;
   hostname = config.networking.hostName;
-  hostUuid = config.wat.installer.hostUuid;
 
   inherit (wat-installer-lib) uuidgen;
 
   isEfi = cfg.bootloader == "efi";
   isGrub = cfg.bootloader == "grub";
 
-in {
+in
+{
 
   options = {
 
@@ -23,7 +26,10 @@ in {
       enable = mkEnableOption "Enable btrfs installer";
 
       bootloader = mkOption {
-        type = types.enum [ "efi" "grub" ];
+        type = types.enum [
+          "efi"
+          "grub"
+        ];
         default = "efi";
       };
 
@@ -85,7 +91,8 @@ in {
       options = [
         "noatime"
         "subvol=/${hostname}"
-      ] ++ optional cfg.installDiskIsSSD "discard=async";
+      ]
+      ++ optional cfg.installDiskIsSSD "discard=async";
     };
 
     fileSystems."/boot" = mkIf isEfi {
@@ -93,9 +100,11 @@ in {
       fsType = "vfat";
     };
 
-    swapDevices = [{
-      device = "/dev/disk/by-uuid/${cfg.swapUuid}";
-    }];
+    swapDevices = [
+      {
+        device = "/dev/disk/by-uuid/${cfg.swapUuid}";
+      }
+    ];
 
     boot.loader.grub = mkIf isGrub {
       configurationLimit = 3;
@@ -122,13 +131,16 @@ in {
 
               typeset -A partitionTable
               partitionTable=([99system]="type=linux, name=\"system\", uuid=\"''${(q)systemPartUuid}\"")
-            '' ++ optional isEfi ''
+            ''
+            ++ optional isEfi ''
               efiPartUuid=${escapeShellArg cfg.efiPartUuid}
 
               partitionTable[0esp]="start=2048, size=512MiB, type=uefi, name=\"esp\", uuid=\"''${(q)efiPartUuid}\""
-            '' ++ optional isGrub ''
+            ''
+            ++ optional isGrub ''
               partitionTable[0bios]="size=1MiB, type=21686148-6449-6E6F-744E-656564454649"
-            '' ++ singleton ''
+            ''
+            ++ singleton ''
               partitionTable[10swap]="size=$swapSize, type=swap, name=\"swap\", uuid=\"''${(q)swapPartUuid}\""
             ''
           );
@@ -143,7 +155,8 @@ in {
 
               echo Ensure partition table changes are known to the kernel
               ${pkgs.busybox}/bin/partprobe $installDisk
-            '' ++ optional cfg.installDiskIsSSD ''
+            ''
+            ++ optional cfg.installDiskIsSSD ''
               echo Discard disk contents
               ${pkgs.util-linux}/bin/blkdiscard $installDisk
             ''
@@ -165,7 +178,8 @@ in {
               echo Ensure partition table changes are known to the kernel
               ${pkgs.busybox}/bin/partprobe $installDisk
               ${pkgs.systemdMinimal}/bin/udevadm settle
-            '' ++ optional isEfi ''
+            ''
+            ++ optional isEfi ''
               echo Create EFI partition
               : ''${espPartition:=/dev/disk/by-partuuid/$efiPartUuid}
               ${pkgs.dosfstools}/bin/mkfs.fat -F32 -n ESP $espPartition
@@ -187,9 +201,11 @@ in {
               ${pkgs.btrfs-progs}/bin/mkfs.btrfs --label $systemLabel --uuid $systemUuid $systemPartition
               ${pkgs.coreutils}/bin/mkdir -p /mnt
               mountOpts=(noatime)
-            '' ++ optional cfg.installDiskIsSSD ''
+            ''
+            ++ optional cfg.installDiskIsSSD ''
               mountOpts+=(discard=async)
-            '' ++ singleton ''
+            ''
+            ++ singleton ''
               ${pkgs.util-linux}/bin/mount -o ''${(j:,:)mountOpts} $systemPartition /mnt
               ${pkgs.btrfs-progs}/bin/btrfs subvolume create /mnt/$hostname
               ${pkgs.btrfs-progs}/bin/btrfs subvolume create /mnt/$hostname/nix
@@ -198,7 +214,8 @@ in {
               #echo Remount the system
               mountOpts+="subvol=/$hostname"
               ${pkgs.util-linux}/bin/mount -o ''${(j:,:)mountOpts} $systemPartition /mnt
-            '' ++ optional isEfi ''
+            ''
+            ++ optional isEfi ''
               echo Mount the efi partition
               ${pkgs.coreutils}/bin/mkdir -p /mnt/boot
               ${pkgs.util-linux}/bin/mount $espPartition /mnt/boot
@@ -207,7 +224,6 @@ in {
         };
 
       };
-
 
     };
   };

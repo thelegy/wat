@@ -1,9 +1,10 @@
-{ writeScript
-, coreutils
-, nix
-, wat-nixos-enter
-, openssh
-, zsh
+{
+  writeScript,
+  coreutils,
+  nix,
+  wat-nixos-enter,
+  openssh,
+  zsh,
 }:
 
 writeScript "activationScript" ''

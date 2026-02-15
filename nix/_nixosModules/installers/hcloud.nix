@@ -1,11 +1,15 @@
-{ lib
-, config
-, modulesPath
-, ... }: with lib;
+{
+  lib,
+  config,
+  modulesPath,
+  ...
+}:
+with lib;
 
 let
   cfg = config.wat.installer.hcloud;
-in {
+in
+{
 
   options = {
 

@@ -1,11 +1,13 @@
-{ lib
-, inxi
-, jq
-, util-linux
-, writeScript
-, zsh
-, nixos-generate-config
-}: with lib;
+{
+  lib,
+  inxi,
+  jq,
+  util-linux,
+  writeScript,
+  zsh,
+  nixos-generate-config,
+}:
+with lib;
 
 writeScript "wat-gather-script" ''
   #!${zsh}/bin/zsh

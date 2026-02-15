@@ -1,22 +1,23 @@
-{ writeScript
-, lib
+{
+  writeScript,
+  lib,
 
-, bcachefs-tools
-, busybox
-, coreutils
-, cryptsetup
-, dosfstools
-, jq
-, lvm2
-, util-linux
-, zsh
+  bcachefs-tools,
+  busybox,
+  coreutils,
+  cryptsetup,
+  dosfstools,
+  jq,
+  lvm2,
+  util-linux,
+  zsh,
 
-, installDisk
-, nixosConfig
-, efiId
-, luksUuid
-, swapSize ? "4G"
-, swapUuid
+  installDisk,
+  nixosConfig,
+  efiId,
+  luksUuid,
+  swapSize ? "4G",
+  swapUuid,
 }:
 with lib;
 
@@ -31,7 +32,8 @@ let
   swapPartition = "/dev/${vgName}/swap";
   systemPartition = "/dev/${vgName}/system";
 
-in writeScript "format-luks-lvm-bcachefs" ''
+in
+writeScript "format-luks-lvm-bcachefs" ''
   #!${zsh}/bin/zsh
   set -e -u -o pipefail
 
@@ -67,7 +69,7 @@ in writeScript "format-luks-lvm-bcachefs" ''
   ${busybox}/bin/partprobe "${installDisk}"
 
   echo Create EFI partition
-  ${dosfstools}/bin/mkfs.fat -F32 -i "${replaceStrings ["-"] [""] efiId}" -n ESP "${espPartition}"
+  ${dosfstools}/bin/mkfs.fat -F32 -i "${replaceStrings [ "-" ] [ "" ] efiId}" -n ESP "${espPartition}"
 
   echo Create LUKS cryptvol
   ${cryptsetup}/bin/cryptsetup --batch-mode --key-file <(echo -n "$luksPassphrase") luksFormat --type luks2 --uuid "${luksUuid}" "${luksPartition}"

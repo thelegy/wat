@@ -1,9 +1,7 @@
 {
-  lib,
   nixpkgs,
   system,
 }:
-with lib;
 
 let
 

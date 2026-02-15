@@ -1,10 +1,7 @@
 {
-  lib,
-  callPackage,
   wat,
   writeShellScriptBin,
 }:
-with lib;
 
 writeShellScriptBin "wat-gather" ''
   hostName="$1"

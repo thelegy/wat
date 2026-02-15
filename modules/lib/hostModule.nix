@@ -33,17 +33,15 @@ let
     ++ (lib.optionals (!cfg.dontLoadWatModules) [ repoUuidModule ])
     ++ (lib.optionals (!cfg.dontLoadFlakeModules) (lib.attrValues (inputs.self.nixosModules or { })));
 
-  wat.lib.hostModule =
-    { config, lib, ... }:
-    {
-      imports = extraModules;
+  wat.lib.hostModule = {
+    imports = extraModules;
 
-      nixpkgs.overlays = extraOverlays;
+    nixpkgs.overlays = extraOverlays;
 
-      _module.args = {
-        inherit flakes;
-      };
+    _module.args = {
+      inherit flakes;
     };
+  };
 in
 {
   inherit wat;

@@ -188,7 +188,7 @@ in
         usageFunction = {
           after = [ "resetPath" ];
           before = [ "early" ];
-          content = localPkgs: ''
+          content = _localPkgs: ''
             usage() cat <<'EOF'
             ${lib.concatMapStringsSep "\n" (
               opt:
@@ -208,7 +208,7 @@ in
         optionParser = {
           after = [ "resetPath" ];
           before = [ "early" ];
-          content = localPkgs: ''
+          content = _localPkgs: ''
             zparseopts -F -M -A opts ${
               lib.escapeShellArgs (
                 lib.flatten (
@@ -233,7 +233,7 @@ in
             "early"
             "options"
           ];
-          content = localPkgs: ''
+          content = _localPkgs: ''
             if [[ -v opts[--help] ]] {
               usage
               exit 0
@@ -243,7 +243,7 @@ in
         targetOption = {
           after = [ "options" ];
           before = [ "early" ];
-          content = localPkgs: ''
+          content = _localPkgs: ''
             : ''${WAT_TARGET:=root@$machine}
             if [[ -v opts[--target] ]] { WAT_TARGET=''${opts[--target]} }
           '';

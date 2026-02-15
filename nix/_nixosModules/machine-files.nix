@@ -21,8 +21,8 @@ let
   );
 
   machineFiles = pipe (flakes.self.nixosConfigurations or { }) [
-    (mapAttrs (key: attrByPath [ "watExtraOutput" "machineFiles" ] { }))
-    (mapAttrs (key1: mapAttrs (key2: val: { file = val; })))
+    (mapAttrs (_key: attrByPath [ "watExtraOutput" "machineFiles" ] { }))
+    (mapAttrs (_key1: mapAttrs (_key2: val: { file = val; })))
   ];
 
 in

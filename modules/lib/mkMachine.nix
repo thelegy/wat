@@ -40,7 +40,7 @@ let
         if isNull path then { } else lib.listToAttrs (lookupMachineFiles path "");
 
       baseConfiguration =
-        { config, lib, ... }:
+        { lib, ... }:
         {
           nix.nixPath = [ "nixpkgs=${nixpkgs}" ];
           nix.registry.nixpkgs.flake = nixpkgs;

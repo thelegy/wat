@@ -1,5 +1,4 @@
 {
-  lib,
   writeShellScriptBin,
   coreutils,
   util-linux,
@@ -8,7 +7,6 @@
   system,
   nixos-enter ? null,
 }:
-with lib;
 
 let
 

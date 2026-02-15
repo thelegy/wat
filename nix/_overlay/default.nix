@@ -1,5 +1,5 @@
 { self, nixpkgs, ... }:
-final: prev:
+final: _prev:
 with final.lib;
 with final;
 

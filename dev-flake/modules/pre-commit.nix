@@ -15,6 +15,7 @@
 
         hooks.deadnix.enable = true;
         hooks.nil.enable = true;
+        hooks.treefmt.enable = true;
       };
 
       devShells.pre-commit = config.pre-commit.devShell;

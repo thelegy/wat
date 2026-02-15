@@ -1,45 +1,24 @@
 {
   "nodes": {
     "dependencyDagOfSubmodule": {
-      "inputs": {
-        "nixpkgs": [
-          "nixpkgs"
-        ]
-      },
       "locked": {
-        "lastModified": 1656615370,
-        "narHash": "sha256-IZDqz1aSySoqf1qtVQg+oJMHfC4IlT55Zoa7EkjvPug=",
+        "lastModified": 1771196170,
+        "narHash": "sha256-097wcVH5SsvxzbSlpEQS58ayXfM2u24X4r7cmI5DFZE=",
         "owner": "thelegy",
         "repo": "nix-dependencyDagOfSubmodule",
-        "rev": "98eb563d80b35acafbfc1abb9ccee569c1efb19c",
+        "rev": "6b4cce23aaa64dd4e704a2c074c0992e3da67594",
         "type": "github"
       },
       "original": {
         "owner": "thelegy",
+        "ref": "dev",
         "repo": "nix-dependencyDagOfSubmodule",
-        "type": "github"
-      }
-    },
-    "nixpkgs": {
-      "locked": {
-        "lastModified": 1771008912,
-        "narHash": "sha256-gf2AmWVTs8lEq7z/3ZAsgnZDhWIckkb+ZnAo5RzSxJg=",
-        "owner": "nixos",
-        "repo": "nixpkgs",
-        "rev": "a82ccc39b39b621151d6732718e3e250109076fa",
-        "type": "github"
-      },
-      "original": {
-        "owner": "nixos",
-        "ref": "nixos-unstable",
-        "repo": "nixpkgs",
         "type": "github"
       }
     },
     "root": {
       "inputs": {
-        "dependencyDagOfSubmodule": "dependencyDagOfSubmodule",
-        "nixpkgs": "nixpkgs"
+        "dependencyDagOfSubmodule": "dependencyDagOfSubmodule"
       }
     }
   },

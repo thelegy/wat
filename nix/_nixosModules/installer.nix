@@ -14,18 +14,25 @@ let
 
   inherit (wat-installer-lib) uuidgen;
 
+  inherit (lib)
+    mkOption
+    types
+    ;
+
+  dependencyDagOfSubmodule = flakes.dependencyDagOfSubmodule.lib lib;
+
 in
 {
 
   options = {
 
-    wat.installer.repoUuid = lib.mkOption {
-      type = lib.types.str;
+    wat.installer.repoUuid = mkOption {
+      type = types.str;
       internal = true;
     };
 
-    wat.installer.hostUuid = lib.mkOption {
-      type = lib.types.str;
+    wat.installer.hostUuid = mkOption {
+      type = types.str;
       default = uuidgen {
         namespace = config.wat.installer.repoUuid;
         name = hostname;
@@ -34,75 +41,71 @@ in
 
     wat.build.installer = {
 
-      activationScript = lib.mkOption {
-        type = lib.types.package;
+      activationScript = mkOption {
+        type = types.package;
         internal = true;
       };
 
-      format.fragments = lib.mkOption {
-        type =
-          with lib.types;
-          dependencyDagOfSubmodule {
-            options = {
-              content = mkOption {
-                type = lines;
-              };
+      format.fragments = mkOption {
+        type = dependencyDagOfSubmodule.type {
+          options = {
+            content = mkOption {
+              type = types.lines;
             };
           };
+        };
       };
 
-      launcher.options = lib.mkOption {
-        type =
-          with lib.types;
-          attrsOf (submodule {
+      launcher.options = mkOption {
+        type = types.attrsOf (
+          types.submodule {
             options = {
               aliases = mkOption {
-                type = listOf str;
+                type = types.listOf types.str;
                 internal = true;
                 default = [ ];
               };
               argument = mkOption {
-                type = bool;
+                type = types.bool;
                 internal = true;
                 default = false;
               };
               help = mkOption {
-                type = str;
+                type = types.str;
                 internal = true;
                 default = "";
               };
               enabled = mkOption {
-                type = bool;
+                type = types.bool;
                 internal = true;
                 default = true;
               };
             };
-          });
+          }
+        );
         internal = true;
       };
 
-      launcher.fragments = lib.mkOption {
-        type =
-          with lib.types;
-          dependencyDagOfSubmodule {
-            options = {
-              content = mkOption {
-                type = functionTo lines;
-              };
+      launcher.fragments = mkOption {
+        type = dependencyDagOfSubmodule.type {
+          options = {
+            content = mkOption {
+              type = types.functionTo types.lines;
             };
           };
+        };
         internal = true;
       };
 
     };
 
-    wat.build.installer.format.script = lib.mkOption {
-      type = lib.types.package;
+    wat.build.installer.format.script = mkOption {
+      type = types.package;
       internal = true;
     };
 
-    wat.build.installer.launcher.script = lib.mkOption {
-      type = with lib.types; attrsOf package;
+    wat.build.installer.launcher.script = mkOption {
+      type = types.attrsOf types.package;
       internal = true;
     };
 
@@ -141,7 +144,7 @@ in
 
       wat.build.installer.format.script =
         let
-          fragments = lib.types.dependencyDagOfSubmodule.toOrderedList cfg.installer.format.fragments;
+          fragments = dependencyDagOfSubmodule.toOrderedList cfg.installer.format.fragments;
         in
         pkgs.writeScript "wat-installer-${hostname}" ''
           #!${pkgs.zsh}/bin/zsh
@@ -288,7 +291,7 @@ in
             overlays =
               (lib.toList (flakes.self.overlay or [ ])) ++ (lib.toList (flakes.self.overlays.default or [ ]));
           };
-          fragments = lib.types.dependencyDagOfSubmodule.toOrderedList cfg.installer.launcher.fragments;
+          fragments = dependencyDagOfSubmodule.toOrderedList cfg.installer.launcher.fragments;
         in
         pkgs.writeScriptBin "wat-installer-launcher-${hostname}" ''
           #!${localPkgs.zsh}/bin/zsh

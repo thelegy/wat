@@ -12,6 +12,9 @@
     {
       pre-commit.settings = {
         rootSrc = lib.mkForce ../..;
+        excludes = [
+          "^vendor/"
+        ];
 
         hooks.deadnix.enable = true;
         hooks.nil.enable = true;

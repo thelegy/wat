@@ -12,6 +12,9 @@
       flakeCheck = false; # Already done by pre-commit
       projectRootFile = ".git/config";
       programs.nixfmt.enable = true;
+      settings.excludes = [
+        "vendor/**"
+      ];
     };
   };
 }

@@ -20,4 +20,10 @@ in
     overlays
     modules
     ;
+  inherit (inputs.dev)
+    checks
+    devShells
+    formatter
+    packages
+    ;
 }

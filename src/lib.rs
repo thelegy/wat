@@ -4,16 +4,24 @@ mod operations;
 
 use std::{path::Path, sync::Once};
 
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 use clap::Parser;
 
 static INIT_LOGGER: Once = Once::new();
 
 pub fn run() -> Result<()> {
     init_logging();
-    prepare_environment()?;
     let cli = cli::Cli::parse();
-    operations::execute(cli.command)
+    match cli.command {
+        cli::Command::Completion(args) => {
+            cli::print_completions(args.shell);
+            Ok(())
+        }
+        command => {
+            prepare_environment()?;
+            operations::execute(command)
+        }
+    }
 }
 
 fn init_logging() {

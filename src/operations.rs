@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use cmd_lib::{run_cmd, run_fun};
 use tempfile::Builder;
 
@@ -26,6 +26,7 @@ pub fn execute(command: CliCommand) -> Result<()> {
         CliCommand::Build(args) => build_only(&backend, &args.hostname),
         CliCommand::Iso(args) => build_artifact(&backend, &args.hostname, ArtifactKind::Iso),
         CliCommand::Sdcard(args) => build_artifact(&backend, &args.hostname, ArtifactKind::Sdcard),
+        CliCommand::Completion(_) => unreachable!("completion is handled before operations"),
     }
 }
 

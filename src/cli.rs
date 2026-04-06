@@ -1,4 +1,5 @@
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, CommandFactory, Parser, Subcommand};
+use clap_complete::Shell;
 
 #[derive(Debug, Parser)]
 #[command(name = "wat", about = "Deploy tool for NixOS hosts")]
@@ -32,10 +33,25 @@ pub enum Command {
 
     /// Build SD card image and print store path
     Sdcard(CommonBuildArgs),
+
+    /// Generate shell completion scripts
+    Completion(CompletionArgs),
 }
 
 #[derive(Debug, Args)]
 pub struct CommonBuildArgs {
     /// The name of the host to operate on
     pub hostname: String,
+}
+
+#[derive(Debug, Args)]
+pub struct CompletionArgs {
+    /// The shell to generate completion scripts for
+    pub shell: Shell,
+}
+
+pub fn print_completions(shell: Shell) {
+    let mut command = Cli::command();
+    let name = command.get_name().to_string();
+    clap_complete::generate(shell, &mut command, name, &mut std::io::stdout());
 }

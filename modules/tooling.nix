@@ -22,7 +22,7 @@ in
   };
 
   config.perSystem =
-    { system, ... }:
+    { system, inputs', ... }:
     let
       pkgs = import inputs.nixpkgs {
         inherit system;
@@ -43,6 +43,7 @@ in
         name = "wat";
         packages = [
           pkgs.wat-deploy-tools
+          inputs'.wat.packages.default
         ];
       };
 

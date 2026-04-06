@@ -17,9 +17,9 @@
           cargoArtifacts = craneLib.buildDepsOnly commonArgs;
           nativeBuildInputs = (commonArgs.nativeBuildInputs or [ ]) ++ [ pkgs.installShellFiles ];
           postInstall = ''
-            installShellCompletion --cmd wat --bash <($out/bin/wat completion bash)
-            installShellCompletion --cmd wat --zsh <($out/bin/wat completion zsh)
-            installShellCompletion --cmd wat --fish <($out/bin/wat completion fish)
+            installShellCompletion --cmd wat --bash <(COMPLETE="bash" $out/bin/wat)
+            installShellCompletion --cmd wat --zsh <(COMPLETE="zsh" $out/bin/wat)
+            installShellCompletion --cmd wat --fish <(COMPLETE="fish" $out/bin/wat)
           '';
         }
       );

@@ -1,5 +1,7 @@
-use clap::{Args, CommandFactory, Parser, Subcommand};
-use clap_complete::Shell;
+use anyhow::{Context, Result, bail};
+use clap::{Args, Parser, Subcommand};
+use clap_complete::{ArgValueCandidates, Shell, engine::CompletionCandidate};
+use log::debug;
 
 #[derive(Debug, Parser)]
 #[command(name = "wat", about = "Deploy tool for NixOS hosts")]
@@ -33,14 +35,12 @@ pub enum Command {
 
     /// Build SD card image and print store path
     Sdcard(CommonBuildArgs),
-
-    /// Generate shell completion scripts
-    Completion(CompletionArgs),
 }
 
 #[derive(Debug, Args)]
 pub struct CommonBuildArgs {
     /// The name of the host to operate on
+    #[arg(add = ArgValueCandidates::new(fetch_hostname_candidates))]
     pub hostname: String,
 }
 
@@ -50,8 +50,45 @@ pub struct CompletionArgs {
     pub shell: Shell,
 }
 
-pub fn print_completions(shell: Shell) {
-    let mut command = Cli::command();
-    let name = command.get_name().to_string();
-    clap_complete::generate(shell, &mut command, name, &mut std::io::stdout());
+fn fetch_hostname_candidates() -> Vec<CompletionCandidate> {
+    match fetch_hostnames() {
+        Ok(hostnames) => hostnames
+            .into_iter()
+            .map(CompletionCandidate::new)
+            .collect(),
+        Err(err) => {
+            debug!("hostname completion unavailable: {err:?}");
+            Vec::new()
+        }
+    }
+}
+
+fn fetch_hostnames() -> Result<Vec<String>> {
+    let binary = std::env::var("WAT_NIX_BINARY").unwrap_or_else(|_| "nix".to_string());
+    let output = std::process::Command::new(&binary)
+        .args([
+            "eval",
+            "--json",
+            "--apply",
+            "builtins.attrNames",
+            ".#nixosConfigurations",
+        ])
+        .output()
+        .with_context(|| format!("failed to invoke {binary} for hostname completion"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!(
+            "{binary} exited with status {}: {}",
+            output.status,
+            stderr.trim()
+        );
+    }
+
+    let stdout =
+        String::from_utf8(output.stdout).context("hostname output contained invalid UTF-8")?;
+    let mut hostnames: Vec<String> =
+        serde_json::from_str(&stdout).context("failed to parse hostname list")?;
+    hostnames.sort();
+    Ok(hostnames)
 }

@@ -5,6 +5,7 @@
   outputs = inputs: inputs.flake-parts.lib.mkFlake { inherit inputs; } (inputs.import-tree ./modules);
 
   inputs = {
+    crane.url = "github:ipetkov/crane";
     flake-compat = {
       flake = false;
       url = "github:NixOS/flake-compat";

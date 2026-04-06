@@ -626,6 +626,8 @@ dependencies = [
  "anyhow",
  "clap",
  "cmd_lib",
+ "env_logger",
+ "log",
  "tempfile",
 ]
 

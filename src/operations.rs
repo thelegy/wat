@@ -5,11 +5,8 @@ use anyhow::{Context, Result, bail};
 use cmd_lib::{run_cmd, run_fun};
 use tempfile::Builder;
 
-use crate::{
-    backend::Backend,
-    cli::Command as CliCommand,
-    logging::{print_info, print_warning},
-};
+use crate::{backend::Backend, cli::Command as CliCommand};
+use log::{info, warn};
 
 pub fn execute(command: CliCommand) -> Result<()> {
     let backend = Backend::detect();
@@ -56,7 +53,7 @@ fn build_artifact(backend: &Backend, hostname: &str, kind: ArtifactKind) -> Resu
         ),
     };
 
-    print_info(info_message);
+    info!("{info_message}");
 
     let out_link = temp_dir.path().join(link_name);
     let binary = backend.binary();
@@ -76,7 +73,7 @@ fn build_artifact(backend: &Backend, hostname: &str, kind: ArtifactKind) -> Resu
 
 fn build_only(backend: &Backend, hostname: &str) -> Result<()> {
     let (store_path, _temp_dir) = build_toplevel(backend, hostname)?;
-    print_info("Build completed");
+    info!("Build completed");
     println!("{}", store_path.display());
     Ok(())
 }
@@ -90,7 +87,7 @@ fn deploy_activation(backend: &Backend, hostname: &str, plan: ActivationPlan) ->
         .to_string();
     let is_target_host = local_hostname == hostname;
 
-    print_info("Deploying target system configuration");
+    info!("Deploying target system configuration");
 
     if is_target_host {
         deploy_local(&store_path, plan)?;
@@ -99,10 +96,10 @@ fn deploy_activation(backend: &Backend, hostname: &str, plan: ActivationPlan) ->
     }
 
     if plan.reboot {
-        print_warning("Reboot triggered");
+        warn!("Reboot triggered");
     }
 
-    print_info("Update completed");
+    info!("Update completed");
     Ok(())
 }
 
@@ -146,7 +143,7 @@ impl ActivationPlan {
 }
 
 fn build_toplevel(backend: &Backend, hostname: &str) -> Result<(PathBuf, tempfile::TempDir)> {
-    print_info("Building target system configuration");
+    info!("Building target system configuration");
 
     let temp_dir = Builder::new()
         .prefix("wat-deploy.")
@@ -194,7 +191,7 @@ fn deploy_local(store_path: &Path, plan: ActivationPlan) -> Result<()> {
         .to_str()
         .context("switch-to-configuration path contains invalid UTF-8")?;
     let command = plan.command;
-    run_cmd!(sudo $switch_to_config $command)
+    run_cmd!(sudo $switch_to_config $command 1>&2)
         .with_context(|| format!("failed to run switch-to-configuration {}", plan.command))?;
 
     run_cmd!(sync).context("failed to sync filesystem")?;
@@ -245,7 +242,7 @@ fn deploy_remote(
         store_path.display(),
         plan.command
     );
-    run_cmd!(ssh $remote_host $remote_switch_cmd)
+    run_cmd!(ssh $remote_host $remote_switch_cmd 1>&2)
         .with_context(|| format!("failed to switch configuration remotely on {hostname}"))?;
 
     if plan.reboot {

@@ -1,31 +1,34 @@
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 use cmd_lib::{run_cmd, run_fun};
 use tempfile::Builder;
 
-use crate::{backend::Backend, cli::Command as CliCommand};
+use crate::{
+    backend::{self, Backend, LogFormat},
+    cli::Command as CliCommand,
+};
 use log::{info, warn};
 
 pub fn execute(command: CliCommand) -> Result<()> {
-    let backend = Backend::detect();
+    let backend_handle = backend::detect();
+    let backend = backend_handle.as_ref();
 
     match command {
         CliCommand::Switch(args) => {
-            deploy_activation(&backend, &args.hostname, ActivationPlan::SWITCH)
+            deploy_activation(backend, &args.hostname, ActivationPlan::SWITCH)
         }
-        CliCommand::Boot(args) => deploy_activation(&backend, &args.hostname, ActivationPlan::BOOT),
+        CliCommand::Boot(args) => deploy_activation(backend, &args.hostname, ActivationPlan::BOOT),
         CliCommand::Reboot(args) => {
-            deploy_activation(&backend, &args.hostname, ActivationPlan::REBOOT)
+            deploy_activation(backend, &args.hostname, ActivationPlan::REBOOT)
         }
-        CliCommand::Test(args) => deploy_activation(&backend, &args.hostname, ActivationPlan::TEST),
+        CliCommand::Test(args) => deploy_activation(backend, &args.hostname, ActivationPlan::TEST),
         CliCommand::DryActivate(args) => {
-            deploy_activation(&backend, &args.hostname, ActivationPlan::DRY_ACTIVATE)
+            deploy_activation(backend, &args.hostname, ActivationPlan::DRY_ACTIVATE)
         }
-        CliCommand::Build(args) => build_only(&backend, &args.hostname),
-        CliCommand::Iso(args) => build_artifact(&backend, &args.hostname, ArtifactKind::Iso),
-        CliCommand::Sdcard(args) => build_artifact(&backend, &args.hostname, ArtifactKind::Sdcard),
+        CliCommand::Build(args) => build_only(backend, &args.hostname),
+        CliCommand::Iso(args) => build_artifact(backend, &args.hostname, ArtifactKind::Iso),
+        CliCommand::Sdcard(args) => build_artifact(backend, &args.hostname, ArtifactKind::Sdcard),
     }
 }
 
@@ -34,7 +37,7 @@ enum ArtifactKind {
     Sdcard,
 }
 
-fn build_artifact(backend: &Backend, hostname: &str, kind: ArtifactKind) -> Result<()> {
+fn build_artifact(backend: &dyn Backend, hostname: &str, kind: ArtifactKind) -> Result<()> {
     let temp_dir = Builder::new()
         .prefix("wat-deploy.")
         .tempdir()
@@ -42,12 +45,12 @@ fn build_artifact(backend: &Backend, hostname: &str, kind: ArtifactKind) -> Resu
 
     let (attr, link_name, info_message) = match kind {
         ArtifactKind::Iso => (
-            backend.iso_attr(hostname),
+            { format!(".#nixosConfigurations.{hostname}.config.system.build.iso") },
             format!("nixos-iso-{hostname}"),
             "Building iso image",
         ),
         ArtifactKind::Sdcard => (
-            backend.sdcard_attr(hostname),
+            { format!(".#nixosConfigurations.{hostname}.config.system.build.sdImage") },
             format!("nixos-sdcard-{hostname}"),
             "Building sdcard image",
         ),
@@ -56,29 +59,23 @@ fn build_artifact(backend: &Backend, hostname: &str, kind: ArtifactKind) -> Resu
     info!("{info_message}");
 
     let out_link = temp_dir.path().join(link_name);
-    let binary = backend.binary();
-
-    run_nix(binary, |cmd| {
-        cmd.args(["--log-format", "bar-with-logs", "build"])
-            .arg(&attr)
-            .arg("--out-link")
-            .arg(&out_link);
-    })
-    .with_context(|| format!("failed to build {attr}"))?;
+    backend
+        .build_installable(&attr, &out_link, false, LogFormat::BarWithLogs)
+        .with_context(|| format!("failed to build {attr}"))?;
 
     let realized = resolve_store_path(&out_link)?;
     println!("{}", realized.display());
     Ok(())
 }
 
-fn build_only(backend: &Backend, hostname: &str) -> Result<()> {
+fn build_only(backend: &dyn Backend, hostname: &str) -> Result<()> {
     let (store_path, _temp_dir) = build_toplevel(backend, hostname)?;
     info!("Build completed");
     println!("{}", store_path.display());
     Ok(())
 }
 
-fn deploy_activation(backend: &Backend, hostname: &str, plan: ActivationPlan) -> Result<()> {
+fn deploy_activation(backend: &dyn Backend, hostname: &str, plan: ActivationPlan) -> Result<()> {
     let (store_path, _temp_dir) = build_toplevel(backend, hostname)?;
 
     let local_hostname = run_fun!(hostname)
@@ -142,7 +139,7 @@ impl ActivationPlan {
     };
 }
 
-fn build_toplevel(backend: &Backend, hostname: &str) -> Result<(PathBuf, tempfile::TempDir)> {
+fn build_toplevel(backend: &dyn Backend, hostname: &str) -> Result<(PathBuf, tempfile::TempDir)> {
     info!("Building target system configuration");
 
     let temp_dir = Builder::new()
@@ -151,17 +148,11 @@ fn build_toplevel(backend: &Backend, hostname: &str) -> Result<(PathBuf, tempfil
         .context("failed to create temporary directory")?;
 
     let out_link = temp_dir.path().join(format!("nixos-config-{hostname}"));
-    let attr = backend.toplevel_attr(hostname);
+    let attr = { format!(".#nixosConfigurations.{hostname}.config.system.build.toplevel") };
 
-    let binary = backend.binary();
-
-    run_nix(binary, |cmd| {
-        cmd.args(["--log-format", "bar-with-logs", "--keep-going", "build"])
-            .arg(&attr)
-            .arg("--out-link")
-            .arg(&out_link);
-    })
-    .with_context(|| format!("failed to build {attr}"))?;
+    backend
+        .build_installable(&attr, &out_link, true, LogFormat::BarWithLogs)
+        .with_context(|| format!("failed to build {attr}"))?;
 
     let realized = resolve_store_path(&out_link)?;
     Ok((realized, temp_dir))
@@ -204,27 +195,20 @@ fn deploy_local(store_path: &Path, plan: ActivationPlan) -> Result<()> {
 }
 
 fn deploy_remote(
-    backend: &Backend,
+    backend: &dyn Backend,
     hostname: &str,
     store_path: &Path,
     plan: ActivationPlan,
 ) -> Result<()> {
-    let attr = backend.toplevel_attr(hostname);
-    let binary = backend.binary();
     let remote_store = format!("ssh://root@{hostname}");
-
-    run_nix(binary, |cmd| {
-        cmd.args([
-            "--log-format",
-            "bar-with-logs",
-            "copy",
-            "--substitute-on-destination",
-            "--to",
-        ])
-        .arg(&remote_store)
-        .arg(&attr);
-    })
-    .with_context(|| format!("failed to copy store path to {hostname}"))?;
+    backend
+        .copy_closure(
+            store_path,
+            remote_store.as_str(),
+            true,
+            LogFormat::BarWithLogs,
+        )
+        .with_context(|| format!("failed to copy store path to {hostname}"))?;
 
     let remote_host = format!("root@{hostname}");
 
@@ -251,17 +235,4 @@ fn deploy_remote(
     }
 
     Ok(())
-}
-
-fn run_nix(binary: &str, configure: impl FnOnce(&mut Command)) -> Result<()> {
-    let mut command = Command::new(binary);
-    configure(&mut command);
-    let status = command
-        .status()
-        .with_context(|| format!("failed to execute {binary}"))?;
-    if status.success() {
-        Ok(())
-    } else {
-        bail!("{binary} exited with status {status}");
-    }
 }

@@ -1,32 +1,44 @@
-pub struct Backend {
-    binary: String,
+use std::path::Path;
+
+use anyhow::Result;
+
+mod lix;
+
+use lix::LixBackend;
+
+pub fn detect() -> Box<dyn Backend + Send + Sync> {
+    let binary = std::env::var("WAT_NIX_BINARY").unwrap_or_else(|_| "nix".to_string());
+    Box::new(LixBackend::new(binary))
 }
 
-impl Backend {
-    pub fn detect() -> Self {
-        let binary = std::env::var("WAT_NIX_BINARY").unwrap_or_else(|_| "nix".to_string());
-        Self::new(binary)
-    }
+pub trait Backend {
+    fn build_installable(
+        &self,
+        installable: &str,
+        out_link: &Path,
+        keep_going: bool,
+        log_format: LogFormat,
+    ) -> Result<()>;
 
-    pub fn new(binary: impl Into<String>) -> Self {
-        Self {
-            binary: binary.into(),
+    fn copy_closure(
+        &self,
+        source: &Path,
+        destination: &str,
+        substitute_on_destination: bool,
+        log_format: LogFormat,
+    ) -> Result<()>;
+    fn list_machines(&self) -> Result<Vec<String>>;
+}
+
+#[derive(Clone, Copy)]
+pub enum LogFormat {
+    BarWithLogs,
+}
+
+impl LogFormat {
+    fn as_arg(self) -> &'static str {
+        match self {
+            LogFormat::BarWithLogs => "bar-with-logs",
         }
-    }
-
-    pub fn binary(&self) -> &str {
-        &self.binary
-    }
-
-    pub fn toplevel_attr(&self, hostname: &str) -> String {
-        format!(".#nixosConfigurations.{hostname}.config.system.build.toplevel")
-    }
-
-    pub fn iso_attr(&self, hostname: &str) -> String {
-        format!(".#nixosConfigurations.{hostname}.config.system.build.iso")
-    }
-
-    pub fn sdcard_attr(&self, hostname: &str) -> String {
-        format!(".#nixosConfigurations.{hostname}.config.system.build.sdImage")
     }
 }

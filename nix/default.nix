@@ -1,7 +1,9 @@
 inputs@{ ... }:
 let
 
-  flakeModules.default = ./flakeModule.nix;
+  flakeModule = ./flakeModule.nix;
+
+  flakeModules.default = flakeModule;
 
   modules.flake = flakeModules;
 
@@ -13,8 +15,8 @@ let
 
 in
 {
-  flakeModule = flakeModules.default;
   inherit
+    flakeModule
     flakeModules
     nixosModules
     overlays

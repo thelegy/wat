@@ -10,12 +10,12 @@ use clap_complete::CompleteEnv;
 
 static INIT_LOGGER: Once = Once::new();
 
-pub fn run() -> Result<()> {
+pub async fn run() -> Result<()> {
     CompleteEnv::with_factory(cli::Cli::command).complete();
     init_logging();
     let cli = cli::Cli::parse();
     prepare_environment()?;
-    operations::execute(cli.command)
+    operations::execute(cli.command).await
 }
 
 fn init_logging() {

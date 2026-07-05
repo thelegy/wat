@@ -1,8 +1,16 @@
-use std::{path::Path, process::Command};
+use std::{
+    path::Path,
+    process::Stdio,
+};
 
 use anyhow::{Context, Result, bail};
+use async_trait::async_trait;
+use tokio::{
+    io::{AsyncBufReadExt, BufReader},
+    process::Command,
+};
 
-use super::{Backend, LogFormat};
+use super::{Backend, lix_renderer::LixRenderer};
 
 pub struct LixBackend {
     binary: String,
@@ -24,44 +32,43 @@ impl LixBackend {
     }
 }
 
+#[async_trait]
 impl Backend for LixBackend {
-    fn build_installable(
+    async fn build_installable(
         &self,
         installable: &str,
         out_link: &Path,
         keep_going: bool,
-        log_format: LogFormat,
     ) -> Result<()> {
         let mut command = self.command();
-        command.args(["--log-format", log_format.as_arg(), "build"]);
+        command.args(["--log-format", "internal-json", "build"]);
         if keep_going {
             command.arg("--keep-going");
         }
         command.arg(installable);
         command.arg("--out-link");
         command.arg(out_link);
-        execute_command(command, self.binary())
+        execute_command(&mut command).await
     }
 
-    fn copy_closure(
+    async fn copy_closure(
         &self,
         source: &Path,
         destination: &str,
         substitute_on_destination: bool,
-        log_format: LogFormat,
     ) -> Result<()> {
         let mut command = self.command();
-        command.args(["--log-format", log_format.as_arg(), "copy"]);
+        command.args(["--log-format", "internal-json", "copy"]);
         if substitute_on_destination {
             command.arg("--substitute-on-destination");
         }
         command.arg("--to");
         command.arg(destination);
         command.arg(source);
-        execute_command(command, self.binary())
+        execute_command(&mut command).await
     }
 
-    fn list_machines(&self) -> Result<Vec<String>> {
+    async fn list_machines(&self) -> Result<Vec<String>> {
         let output = self
             .command()
             .args([
@@ -72,6 +79,7 @@ impl Backend for LixBackend {
                 ".#nixosConfigurations",
             ])
             .output()
+            .await
             .with_context(|| {
                 format!("failed to invoke {} for hostname completion", self.binary())
             })?;
@@ -93,15 +101,46 @@ impl Backend for LixBackend {
         hostnames.sort();
         Ok(hostnames)
     }
+
 }
 
-fn execute_command(mut command: Command, binary: &str) -> Result<()> {
-    let status = command
-        .status()
-        .with_context(|| format!("failed to execute {binary}"))?;
+async fn execute_command(command: &mut Command) -> Result<()> {
+    command.stdout(Stdio::null());
+    command.stderr(Stdio::piped());
+
+    let mut child = command.spawn().with_context(|| "failed to execute lix")?;
+
+    let stderr = child
+        .stderr
+        .take()
+        .context("failed to capture command stderr")?;
+
+    let mut renderer = LixRenderer::new();
+
+    let mut lines = BufReader::new(stderr).lines();
+    let mut read_error = None;
+    loop {
+        match lines.next_line().await {
+            Ok(Some(line)) => renderer.handle_stderr_line(&line),
+            Ok(None) => break,
+            Err(error) => {
+                read_error = Some(error);
+                break;
+            }
+        }
+    }
+
+    let status = child.wait().await.with_context(|| "failed to wait for lix")?;
+
+    if let Some(error) = read_error {
+        log::warn!("failed reading stderr from lix: {error}");
+    }
+
+    renderer.finish(status.success());
+
     if status.success() {
         Ok(())
     } else {
-        bail!("{binary} exited with status {status}");
+        bail!("lix exited with status {status}");
     }
 }

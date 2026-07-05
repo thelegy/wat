@@ -67,5 +67,9 @@ fn fetch_hostname_candidates() -> Vec<CompletionCandidate> {
 
 fn fetch_hostnames() -> Result<Vec<String>> {
     let backend = backend::detect();
-    backend.list_machines()
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(anyhow::Error::from)?
+        .block_on(backend.list_machines())
 }

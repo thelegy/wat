@@ -2,6 +2,10 @@
 .direnv
 
 
+# nix
+result
+
+
 # Added by cargo
 
 /target

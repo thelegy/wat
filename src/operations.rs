@@ -1,34 +1,37 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use cmd_lib::{run_cmd, run_fun};
+use tokio::{
+    fs,
+    process::Command,
+};
 use tempfile::Builder;
 
 use crate::{
-    backend::{self, Backend, LogFormat},
+    backend::{self, Backend},
     cli::Command as CliCommand,
 };
 use log::{info, warn};
 
-pub fn execute(command: CliCommand) -> Result<()> {
+pub async fn execute(command: CliCommand) -> Result<()> {
     let backend_handle = backend::detect();
     let backend = backend_handle.as_ref();
 
     match command {
         CliCommand::Switch(args) => {
-            deploy_activation(backend, &args.hostname, ActivationPlan::SWITCH)
+            deploy_activation(backend, &args.hostname, ActivationPlan::SWITCH).await
         }
-        CliCommand::Boot(args) => deploy_activation(backend, &args.hostname, ActivationPlan::BOOT),
+        CliCommand::Boot(args) => deploy_activation(backend, &args.hostname, ActivationPlan::BOOT).await,
         CliCommand::Reboot(args) => {
-            deploy_activation(backend, &args.hostname, ActivationPlan::REBOOT)
+            deploy_activation(backend, &args.hostname, ActivationPlan::REBOOT).await
         }
-        CliCommand::Test(args) => deploy_activation(backend, &args.hostname, ActivationPlan::TEST),
+        CliCommand::Test(args) => deploy_activation(backend, &args.hostname, ActivationPlan::TEST).await,
         CliCommand::DryActivate(args) => {
-            deploy_activation(backend, &args.hostname, ActivationPlan::DRY_ACTIVATE)
+            deploy_activation(backend, &args.hostname, ActivationPlan::DRY_ACTIVATE).await
         }
-        CliCommand::Build(args) => build_only(backend, &args.hostname),
-        CliCommand::Iso(args) => build_artifact(backend, &args.hostname, ArtifactKind::Iso),
-        CliCommand::Sdcard(args) => build_artifact(backend, &args.hostname, ArtifactKind::Sdcard),
+        CliCommand::Build(args) => build_only(backend, &args.hostname).await,
+        CliCommand::Iso(args) => build_artifact(backend, &args.hostname, ArtifactKind::Iso).await,
+        CliCommand::Sdcard(args) => build_artifact(backend, &args.hostname, ArtifactKind::Sdcard).await,
     }
 }
 
@@ -37,7 +40,7 @@ enum ArtifactKind {
     Sdcard,
 }
 
-fn build_artifact(backend: &dyn Backend, hostname: &str, kind: ArtifactKind) -> Result<()> {
+async fn build_artifact(backend: &dyn Backend, hostname: &str, kind: ArtifactKind) -> Result<()> {
     let temp_dir = Builder::new()
         .prefix("wat-deploy.")
         .tempdir()
@@ -60,36 +63,34 @@ fn build_artifact(backend: &dyn Backend, hostname: &str, kind: ArtifactKind) -> 
 
     let out_link = temp_dir.path().join(link_name);
     backend
-        .build_installable(&attr, &out_link, false, LogFormat::BarWithLogs)
+        .build_installable(&attr, &out_link, false)
+        .await
         .with_context(|| format!("failed to build {attr}"))?;
 
-    let realized = resolve_store_path(&out_link)?;
+    let realized = resolve_store_path(&out_link).await?;
     println!("{}", realized.display());
     Ok(())
 }
 
-fn build_only(backend: &dyn Backend, hostname: &str) -> Result<()> {
-    let (store_path, _temp_dir) = build_toplevel(backend, hostname)?;
+async fn build_only(backend: &dyn Backend, hostname: &str) -> Result<()> {
+    let (store_path, _temp_dir) = build_toplevel(backend, hostname).await?;
     info!("Build completed");
     println!("{}", store_path.display());
     Ok(())
 }
 
-fn deploy_activation(backend: &dyn Backend, hostname: &str, plan: ActivationPlan) -> Result<()> {
-    let (store_path, _temp_dir) = build_toplevel(backend, hostname)?;
+async fn deploy_activation(backend: &dyn Backend, hostname: &str, plan: ActivationPlan) -> Result<()> {
+    let (store_path, _temp_dir) = build_toplevel(backend, hostname).await?;
 
-    let local_hostname = run_fun!(hostname)
-        .context("failed to determine local hostname")?
-        .trim()
-        .to_string();
+    let local_hostname = run_command_output("hostname", &[]).await?.trim().to_string();
     let is_target_host = local_hostname == hostname;
 
     info!("Deploying target system configuration");
 
     if is_target_host {
-        deploy_local(&store_path, plan)?;
+        deploy_local(&store_path, plan).await?;
     } else {
-        deploy_remote(backend, hostname, &store_path, plan)?;
+        deploy_remote(backend, hostname, &store_path, plan).await?;
     }
 
     if plan.reboot {
@@ -139,7 +140,7 @@ impl ActivationPlan {
     };
 }
 
-fn build_toplevel(backend: &dyn Backend, hostname: &str) -> Result<(PathBuf, tempfile::TempDir)> {
+async fn build_toplevel(backend: &dyn Backend, hostname: &str) -> Result<(PathBuf, tempfile::TempDir)> {
     info!("Building target system configuration");
 
     let temp_dir = Builder::new()
@@ -151,30 +152,36 @@ fn build_toplevel(backend: &dyn Backend, hostname: &str) -> Result<(PathBuf, tem
     let attr = { format!(".#nixosConfigurations.{hostname}.config.system.build.toplevel") };
 
     backend
-        .build_installable(&attr, &out_link, true, LogFormat::BarWithLogs)
+        .build_installable(&attr, &out_link, true)
+        .await
         .with_context(|| format!("failed to build {attr}"))?;
 
-    let realized = resolve_store_path(&out_link)?;
+    let realized = resolve_store_path(&out_link).await?;
     Ok((realized, temp_dir))
 }
 
-fn resolve_store_path(link: &Path) -> Result<PathBuf> {
-    if !link.exists() {
+async fn resolve_store_path(link: &Path) -> Result<PathBuf> {
+    if !fs::try_exists(link).await.context("failed to check build output link")? {
         bail!("build output link {} does not exist", link.display());
     }
 
-    std::fs::canonicalize(link)
+    fs::canonicalize(link)
+        .await
         .with_context(|| format!("failed to resolve store path for {}", link.display()))
 }
 
-fn deploy_local(store_path: &Path, plan: ActivationPlan) -> Result<()> {
+async fn deploy_local(store_path: &Path, plan: ActivationPlan) -> Result<()> {
     let store_path_str = store_path
         .to_str()
         .context("store path contains invalid UTF-8")?;
 
     if plan.set_profile {
-        run_cmd!(sudo nix-env --profile /nix/var/nix/profiles/system --set $store_path_str)
-            .context("failed to set system profile")?;
+        run_command_status(
+            "sudo",
+            &["nix-env", "--profile", "/nix/var/nix/profiles/system", "--set", store_path_str],
+        )
+        .await
+        .context("failed to set system profile")?;
     }
 
     let switch_to_config = store_path.join("bin/switch-to-configuration");
@@ -182,19 +189,20 @@ fn deploy_local(store_path: &Path, plan: ActivationPlan) -> Result<()> {
         .to_str()
         .context("switch-to-configuration path contains invalid UTF-8")?;
     let command = plan.command;
-    run_cmd!(sudo $switch_to_config $command 1>&2)
+    run_command_status("sudo", &[switch_to_config, command])
+        .await
         .with_context(|| format!("failed to run switch-to-configuration {}", plan.command))?;
 
-    run_cmd!(sync).context("failed to sync filesystem")?;
+    run_command_status("sync", &[]).await.context("failed to sync filesystem")?;
 
     if plan.reboot {
-        run_cmd!(sudo systemctl reboot).context("failed to reboot host")?;
+        run_command_status("sudo", &["systemctl", "reboot"]).await.context("failed to reboot host")?;
     }
 
     Ok(())
 }
 
-fn deploy_remote(
+async fn deploy_remote(
     backend: &dyn Backend,
     hostname: &str,
     store_path: &Path,
@@ -202,12 +210,8 @@ fn deploy_remote(
 ) -> Result<()> {
     let remote_store = format!("ssh://root@{hostname}");
     backend
-        .copy_closure(
-            store_path,
-            remote_store.as_str(),
-            true,
-            LogFormat::BarWithLogs,
-        )
+        .copy_closure(store_path, remote_store.as_str(), true)
+        .await
         .with_context(|| format!("failed to copy store path to {hostname}"))?;
 
     let remote_host = format!("root@{hostname}");
@@ -217,7 +221,8 @@ fn deploy_remote(
             "nix-env --profile /nix/var/nix/profiles/system --set {}",
             store_path.display()
         );
-        run_cmd!(ssh $remote_host $remote_cmd)
+        run_command_status("ssh", &[remote_host.as_str(), remote_cmd.as_str()])
+            .await
             .with_context(|| format!("failed to set remote profile on {hostname}"))?;
     }
 
@@ -226,13 +231,46 @@ fn deploy_remote(
         store_path.display(),
         plan.command
     );
-    run_cmd!(ssh $remote_host $remote_switch_cmd 1>&2)
+    run_command_status("ssh", &[remote_host.as_str(), remote_switch_cmd.as_str()])
+        .await
         .with_context(|| format!("failed to switch configuration remotely on {hostname}"))?;
 
     if plan.reboot {
-        run_cmd!(ssh $remote_host "systemctl reboot")
+        run_command_status("ssh", &[remote_host.as_str(), "systemctl reboot"])
+            .await
             .with_context(|| format!("failed to reboot remote host {hostname}"))?;
     }
 
     Ok(())
+}
+
+async fn run_command_output(program: &str, args: &[&str]) -> Result<String> {
+    let output = Command::new(program)
+        .args(args)
+        .output()
+        .await
+        .with_context(|| format!("failed to run {program}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("{program} exited with status {}: {}", output.status, stderr.trim());
+    }
+
+    String::from_utf8(output.stdout).context("command output contained invalid UTF-8")
+}
+
+async fn run_command_status(program: &str, args: &[&str]) -> Result<()> {
+    let status = Command::new(program)
+        .args(args)
+        .stderr(std::process::Stdio::inherit())
+        .stdout(std::process::Stdio::inherit())
+        .status()
+        .await
+        .with_context(|| format!("failed to run {program}"))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        bail!("{program} exited with status {status}")
+    }
 }

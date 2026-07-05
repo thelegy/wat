@@ -1,5 +1,6 @@
-fn main() {
-    if let Err(error) = wat::run() {
+#[tokio::main]
+async fn main() {
+    if let Err(error) = wat::run().await {
         eprintln!("{error}");
         std::process::exit(1);
     }

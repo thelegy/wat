@@ -167,7 +167,15 @@ impl LixRenderer {
             "msg" => {
                 let level = value.get("level").and_then(Value::as_u64).unwrap_or(3);
                 if let Some(message) = value.get("msg").and_then(Value::as_str) {
-                    self.log(self.level_for_verbosity(level), message);
+                    let level = self.level_for_verbosity(level);
+                    let level = if level == Level::Error
+                        && message.starts_with("trace: evaluation warning:")
+                    {
+                        Level::Warn
+                    } else {
+                        level
+                    };
+                    self.log(level, message);
                 }
             }
             "start" => self.handle_start(&value),

@@ -1,12 +1,9 @@
-use std::{
-    collections::{HashMap, HashSet},
-    io::IsTerminal,
-    time::{Duration, Instant},
-};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
-use indicatif::{ProgressBar, ProgressStyle};
-use log::{Level, debug, error, info, trace, warn};
-use serde_json::Value;
+use crate::event::{
+    BackendEvent, EventEnvelope, HostEvent, LixEvent, LixField, PipelineEvent,
+    PipelinePhase,
+};
 
 const ACT_COPY_PATH: u64 = 100;
 const ACT_FILE_TRANSFER: u64 = 101;
@@ -18,8 +15,6 @@ const ACT_VERIFY_PATHS: u64 = 107;
 const ACT_SUBSTITUTE: u64 = 108;
 const ACT_QUERY_PATH_INFO: u64 = 109;
 const ACT_POST_BUILD_HOOK: u64 = 110;
-const ACT_BUILD_WAITING: u64 = 111;
-
 const RES_FILE_LINKED: u64 = 100;
 const RES_BUILD_LOG_LINE: u64 = 101;
 const RES_UNTRUSTED_PATH: u64 = 102;
@@ -30,6 +25,44 @@ const RES_SET_EXPECTED: u64 = 106;
 const RES_POST_BUILD_LOG_LINE: u64 = 107;
 
 const MIB: f64 = 1024.0 * 1024.0;
+
+#[derive(Debug, Clone, Default)]
+pub struct PipelineSnapshot {
+    pub summary: String,
+    pub hosts: Vec<HostSnapshot>,
+    pub activities: Vec<ActivitySnapshot>,
+    pub finished: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct HostSnapshot {
+    pub host: String,
+    pub message: String,
+    pub phase: Option<PipelinePhase>,
+    pub finished: bool,
+    pub success: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ActivitySnapshot {
+    pub id: u64,
+    pub host: Option<String>,
+    pub text: String,
+    pub last_line: String,
+    pub visible: bool,
+    pub done: u64,
+    pub expected: u64,
+    pub running: u64,
+    pub failed: u64,
+}
+
+#[derive(Default)]
+struct HostState {
+    message: String,
+    phase: Option<PipelinePhase>,
+    finished: bool,
+    success: Option<bool>,
+}
 
 #[derive(Default)]
 struct ActivitiesByType {
@@ -48,7 +81,6 @@ struct ActivityAggregate {
 }
 
 struct ActivityInfo {
-    order: u64,
     kind: u64,
     parent: u64,
     text: String,
@@ -61,157 +93,165 @@ struct ActivityInfo {
     visible: bool,
     expected_by_type: HashMap<u64, u64>,
     name: Option<String>,
-    start_time: Instant,
+    host: Option<String>,
 }
 
-enum Field {
-    Int(u64),
-    Str(String),
-}
-
-impl Field {
-    fn as_int(&self) -> Option<u64> {
-        match self {
-            Field::Int(value) => Some(*value),
-            Field::Str(_) => None,
-        }
-    }
-
-    fn as_str(&self) -> Option<&str> {
-        match self {
-            Field::Int(_) => None,
-            Field::Str(value) => Some(value.as_str()),
-        }
-    }
-}
-
-pub struct LixRenderer {
-    progress: Option<ProgressBar>,
-    last_status: String,
-    sequence: u64,
+pub struct PipelineReducer {
+    hosts: BTreeMap<String, HostState>,
     activities: HashMap<u64, ActivityInfo>,
     by_type: HashMap<u64, ActivitiesByType>,
     files_linked: u64,
     bytes_linked: u64,
     corrupted_paths: u64,
     untrusted_paths: u64,
+    finished: bool,
 }
 
-impl LixRenderer {
+impl PipelineReducer {
     pub fn new() -> Self {
-        let progress = if std::io::stderr().is_terminal() {
-            let progress = ProgressBar::new_spinner();
-            let style = ProgressStyle::with_template("{spinner:.cyan} {msg}")
-                .unwrap_or_else(|_| ProgressStyle::default_spinner());
-            progress.set_style(style);
-            progress.enable_steady_tick(Duration::from_millis(120));
-            Some(progress)
-        } else {
-            None
-        };
-
         Self {
-            progress,
-            last_status: String::new(),
-            sequence: 0,
+            hosts: BTreeMap::new(),
             activities: HashMap::new(),
             by_type: HashMap::new(),
             files_linked: 0,
             bytes_linked: 0,
             corrupted_paths: 0,
             untrusted_paths: 0,
+            finished: false,
         }
     }
 
-    pub fn handle_stderr_line(&mut self, line: &str) {
-        let line = line.trim_end_matches('\r');
-        if line.is_empty() {
-            return;
-        }
-
-        if let Some(json_line) = line.strip_prefix("@nix ") {
-            match serde_json::from_str::<Value>(json_line) {
-                Ok(value) => self.handle_json(value),
-                Err(error) => self.log(Level::Warn, &format!("invalid nix log JSON: {error}")),
-            }
-            return;
-        }
-
-        self.log(Level::Info, line);
-    }
-
-    pub fn finish(&mut self, success: bool) {
-        let Some(progress) = self.progress.take() else {
-            return;
-        };
-
-        if success {
-            progress.finish_and_clear();
-            return;
-        }
-
-        let final_message = self.current_status_line();
-        if final_message.is_empty() {
-            progress.abandon_with_message("command failed");
-        } else {
-            progress.abandon_with_message(final_message);
+    pub fn apply(&mut self, envelope: &EventEnvelope) {
+        match &envelope.event {
+            crate::event::Event::Pipeline(event) => self.apply_pipeline(event),
+            crate::event::Event::Host(event) => self.apply_host(event),
+            crate::event::Event::Backend(event) => self.apply_backend(&envelope.scope.host, event),
+            crate::event::Event::Log(_) => {}
+            crate::event::Event::Artifact(_) => {}
         }
     }
 
-    fn handle_json(&mut self, value: Value) {
-        let Some(action) = value.get("action").and_then(Value::as_str) else {
-            return;
-        };
+    pub fn snapshot(&self) -> PipelineSnapshot {
+        PipelineSnapshot {
+            summary: self.status_summary(),
+            hosts: self
+                .hosts
+                .iter()
+                .map(|(host, state)| HostSnapshot {
+                    host: host.clone(),
+                    message: state.message.clone(),
+                    phase: state.phase,
+                    finished: state.finished,
+                    success: state.success,
+                })
+                .collect(),
+            activities: self
+                .activities
+                .iter()
+                .map(|(id, activity)| ActivitySnapshot {
+                    id: *id,
+                    host: activity.host.clone(),
+                    text: activity.text.clone(),
+                    last_line: activity.last_line.clone(),
+                    visible: activity.visible,
+                    done: activity.done,
+                    expected: activity.expected,
+                    running: activity.running,
+                    failed: activity.failed,
+                })
+                .collect(),
+            finished: self.finished,
+        }
+    }
 
-        match action {
-            "msg" => {
-                let level = value.get("level").and_then(Value::as_u64).unwrap_or(3);
-                if let Some(message) = value.get("msg").and_then(Value::as_str) {
-                    let level = self.level_for_verbosity(level);
-                    let level = if level == Level::Error
-                        && message.starts_with("trace: evaluation warning:")
-                    {
-                        Level::Warn
-                    } else {
-                        level
-                    };
-                    self.log(level, message);
+    fn apply_pipeline(&mut self, event: &PipelineEvent) {
+        match event {
+            PipelineEvent::Started { hosts } => {
+                for host in hosts {
+                    self.hosts.entry(host.clone()).or_default();
                 }
             }
-            "start" => self.handle_start(&value),
-            "stop" => self.handle_stop(&value),
-            "result" => self.handle_result(&value),
-            _ => {}
+            PipelineEvent::PhaseStarted(phase) => {
+                let _ = phase;
+            }
+            PipelineEvent::PhaseFinished { phase, success } => {
+                let _ = (phase, success);
+            }
+            PipelineEvent::Finished { success } => self.finished = *success,
         }
     }
 
-    fn handle_start(&mut self, value: &Value) {
-        let Some(id) = value.get("id").and_then(Value::as_u64) else {
+    fn apply_host(&mut self, event: &HostEvent) {
+        match event {
+            HostEvent::Started { host, phase } => {
+                let state = self.hosts.entry(host.clone()).or_default();
+                state.phase = Some(*phase);
+                state.finished = false;
+                state.success = None;
+                state.message = format!("{} {}", phase_name(*phase), host);
+            }
+            HostEvent::Finished {
+                host,
+                phase,
+                success,
+            } => {
+                let state = self.hosts.entry(host.clone()).or_default();
+                state.phase = Some(*phase);
+                state.finished = true;
+                state.success = Some(*success);
+                state.message = if *success {
+                    format!("{} {} complete", phase_name(*phase), host)
+                } else {
+                    format!("{} {} failed", phase_name(*phase), host)
+                };
+            }
+        }
+    }
+
+    fn apply_backend(&mut self, host: &Option<String>, event: &BackendEvent) {
+        match event {
+            BackendEvent::Lix(event) => self.apply_lix(host, event),
+        }
+    }
+
+    fn apply_lix(&mut self, host: &Option<String>, event: &LixEvent) {
+        match event {
+            LixEvent::Start {
+                id,
+                kind,
+                parent,
+                level,
+                text,
+                fields,
+            } => self.handle_start(*id, *kind, *parent, *level, text, fields, host.clone()),
+            LixEvent::Stop { id } => self.handle_stop(*id),
+            LixEvent::Result {
+                id,
+                result_type,
+                fields,
+            } => self.handle_result(*id, *result_type, fields),
+        }
+    }
+
+    fn handle_start(
+        &mut self,
+        id: u64,
+        kind: u64,
+        parent: u64,
+        level: u64,
+        text: &str,
+        fields: &[LixField],
+        host: Option<String>,
+    ) {
+        let _ = level;
+        if id == 0 {
             return;
-        };
-
-        let kind = value.get("type").and_then(Value::as_u64).unwrap_or(0);
-        let level = value.get("level").and_then(Value::as_u64).unwrap_or(3);
-        let parent = value.get("parent").and_then(Value::as_u64).unwrap_or(0);
-        let text = value
-            .get("text")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string();
-
-        if !text.is_empty() && kind != ACT_BUILD_WAITING {
-            self.log(self.level_for_verbosity(level), &format!("{text}..."));
         }
 
-        let fields = parse_fields(value.get("fields"));
-
-        self.sequence += 1;
-
         let mut activity = ActivityInfo {
-            order: self.sequence,
             kind,
             parent,
-            text,
+            text: text.to_string(),
             last_line: String::new(),
             phase: String::new(),
             done: 0,
@@ -221,35 +261,33 @@ impl LixRenderer {
             visible: true,
             expected_by_type: HashMap::new(),
             name: None,
-            start_time: Instant::now(),
+            host,
         };
 
         match kind {
             ACT_BUILD => {
                 let name = fields
                     .first()
-                    .and_then(Field::as_str)
+                    .and_then(LixField::as_str)
                     .map(store_path_to_name)
                     .unwrap_or_default();
-                let machine = fields.get(1).and_then(Field::as_str).unwrap_or_default();
+                let machine = fields.get(1).and_then(LixField::as_str).unwrap_or_default();
 
                 if !name.is_empty() {
                     activity.text = format!("building {name}");
                 }
-
                 if !machine.is_empty() {
                     activity.text.push_str(&format!(" on {machine}"));
                 }
-
                 activity.name = if name.is_empty() { None } else { Some(name) };
             }
             ACT_SUBSTITUTE => {
                 let name = fields
                     .first()
-                    .and_then(Field::as_str)
+                    .and_then(LixField::as_str)
                     .map(store_path_to_name)
                     .unwrap_or_default();
-                let substituter = fields.get(1).and_then(Field::as_str).unwrap_or_default();
+                let substituter = fields.get(1).and_then(LixField::as_str).unwrap_or_default();
 
                 if substituter.starts_with("local") {
                     activity.text = format!("copying {name} from {substituter}");
@@ -260,7 +298,7 @@ impl LixRenderer {
             ACT_POST_BUILD_HOOK => {
                 let name = fields
                     .first()
-                    .and_then(Field::as_str)
+                    .and_then(LixField::as_str)
                     .map(store_path_to_name)
                     .unwrap_or_default();
                 activity.text = format!("post-build {name}");
@@ -269,10 +307,10 @@ impl LixRenderer {
             ACT_QUERY_PATH_INFO => {
                 let name = fields
                     .first()
-                    .and_then(Field::as_str)
+                    .and_then(LixField::as_str)
                     .map(store_path_to_name)
                     .unwrap_or_default();
-                let substituter = fields.get(1).and_then(Field::as_str).unwrap_or_default();
+                let substituter = fields.get(1).and_then(LixField::as_str).unwrap_or_default();
                 activity.text = format!("querying {name} on {substituter}");
             }
             _ => {}
@@ -288,14 +326,9 @@ impl LixRenderer {
 
         self.activities.insert(id, activity);
         self.by_type.entry(kind).or_default().active_ids.insert(id);
-        self.refresh_status();
     }
 
-    fn handle_stop(&mut self, value: &Value) {
-        let Some(id) = value.get("id").and_then(Value::as_u64) else {
-            return;
-        };
-
+    fn handle_stop(&mut self, id: u64) {
         let Some(activity) = self.activities.remove(&id) else {
             return;
         };
@@ -309,30 +342,18 @@ impl LixRenderer {
             let by_type = self.by_type.entry(kind).or_default();
             by_type.expected = by_type.expected.saturating_sub(expected);
         }
-
-        self.refresh_status();
     }
 
-    fn handle_result(&mut self, value: &Value) {
-        let Some(id) = value.get("id").and_then(Value::as_u64) else {
-            return;
-        };
-        let Some(result_type) = value.get("type").and_then(Value::as_u64) else {
-            return;
-        };
-
-        let fields = parse_fields(value.get("fields"));
-
+    fn handle_result(&mut self, id: u64, result_type: u64, fields: &[LixField]) {
         match result_type {
             RES_FILE_LINKED => {
                 self.files_linked = self.files_linked.saturating_add(1);
-                if let Some(bytes) = fields.first().and_then(Field::as_int) {
+                if let Some(bytes) = fields.first().and_then(LixField::as_int) {
                     self.bytes_linked = self.bytes_linked.saturating_add(bytes);
                 }
-                self.refresh_status();
             }
             RES_BUILD_LOG_LINE | RES_POST_BUILD_LOG_LINE => {
-                let Some(line) = fields.first().and_then(Field::as_str) else {
+                let Some(line) = fields.first().and_then(LixField::as_str) else {
                     return;
                 };
 
@@ -349,48 +370,36 @@ impl LixRenderer {
                     }
                 }
 
-                if result_type == RES_POST_BUILD_LOG_LINE {
-                    self.log(Level::Info, &format!("post-build-hook: {line}"));
-                } else if name.is_empty() {
-                    self.log(Level::Info, &line);
-                } else {
-                    self.log(Level::Info, &format!("{name}> {line}"));
-                }
-
-                self.refresh_status();
+                let _ = name;
             }
             RES_UNTRUSTED_PATH => {
                 self.untrusted_paths = self.untrusted_paths.saturating_add(1);
-                self.refresh_status();
             }
             RES_CORRUPTED_PATH => {
                 self.corrupted_paths = self.corrupted_paths.saturating_add(1);
-                self.refresh_status();
             }
             RES_SET_PHASE => {
-                let Some(phase) = fields.first().and_then(Field::as_str) else {
+                let Some(phase) = fields.first().and_then(LixField::as_str) else {
                     return;
                 };
 
                 if let Some(activity) = self.activities.get_mut(&id) {
                     activity.phase = phase.to_string();
-                    self.refresh_status();
                 }
             }
             RES_PROGRESS => {
                 if let Some(activity) = self.activities.get_mut(&id) {
-                    activity.done = fields.first().and_then(Field::as_int).unwrap_or(0);
-                    activity.expected = fields.get(1).and_then(Field::as_int).unwrap_or(0);
-                    activity.running = fields.get(2).and_then(Field::as_int).unwrap_or(0);
-                    activity.failed = fields.get(3).and_then(Field::as_int).unwrap_or(0);
-                    self.refresh_status();
+                    activity.done = fields.first().and_then(LixField::as_int).unwrap_or(0);
+                    activity.expected = fields.get(1).and_then(LixField::as_int).unwrap_or(0);
+                    activity.running = fields.get(2).and_then(LixField::as_int).unwrap_or(0);
+                    activity.failed = fields.get(3).and_then(LixField::as_int).unwrap_or(0);
                 }
             }
             RES_SET_EXPECTED => {
-                let Some(expected_kind) = fields.first().and_then(Field::as_int) else {
+                let Some(expected_kind) = fields.first().and_then(LixField::as_int) else {
                     return;
                 };
-                let expected_value = fields.get(1).and_then(Field::as_int).unwrap_or(0);
+                let expected_value = fields.get(1).and_then(LixField::as_int).unwrap_or(0);
 
                 if let Some(activity) = self.activities.get_mut(&id) {
                     let entry = activity.expected_by_type.entry(expected_kind).or_insert(0);
@@ -402,21 +411,9 @@ impl LixRenderer {
                         .expected
                         .saturating_sub(old)
                         .saturating_add(expected_value);
-
-                    self.refresh_status();
                 }
             }
             _ => {}
-        }
-    }
-
-    fn level_for_verbosity(&self, level: u64) -> Level {
-        match level {
-            0 => Level::Error,
-            1 => Level::Warn,
-            2..=4 => Level::Info,
-            5..=6 => Level::Debug,
-            _ => Level::Trace,
         }
     }
 
@@ -434,65 +431,6 @@ impl LixRenderer {
         }
 
         false
-    }
-
-    fn refresh_status(&mut self) {
-        let Some(progress) = self.progress.as_ref() else {
-            return;
-        };
-
-        let line = self.current_status_line();
-        if line != self.last_status {
-            progress.set_message(line.clone());
-            self.last_status = line;
-        }
-
-        progress.tick();
-    }
-
-    fn current_status_line(&self) -> String {
-        let status = self.status_summary();
-        let activity = self.current_activity();
-
-        match (status.is_empty(), activity.is_empty()) {
-            (false, false) => format!("[{status}] {activity}"),
-            (false, true) => format!("[{status}]"),
-            (true, false) => activity,
-            (true, true) => String::new(),
-        }
-    }
-
-    fn current_activity(&self) -> String {
-        let Some(activity) = self
-            .activities
-            .values()
-            .filter(|activity| activity.visible)
-            .filter(|activity| !activity.text.is_empty() || !activity.last_line.is_empty())
-            .filter(|activity| activity.start_time.elapsed() >= Duration::from_millis(10))
-            .max_by_key(|activity| activity.order)
-        else {
-            return String::new();
-        };
-
-        let mut line = activity.text.clone();
-
-        if !activity.phase.is_empty() {
-            if !line.is_empty() {
-                line.push(' ');
-            }
-            line.push('(');
-            line.push_str(&activity.phase);
-            line.push(')');
-        }
-
-        if !activity.last_line.is_empty() {
-            if !line.is_empty() {
-                line.push_str(": ");
-            }
-            line.push_str(&activity.last_line);
-        }
-
-        line
     }
 
     fn status_summary(&self) -> String {
@@ -647,40 +585,36 @@ impl LixRenderer {
 
         aggregate
     }
+}
 
-    fn log(&self, level: Level, message: &str) {
-        if let Some(progress) = &self.progress {
-            progress.suspend(|| log_message(level, message));
-            return;
+impl LixField {
+    fn as_int(&self) -> Option<u64> {
+        match self {
+            LixField::Int(value) => Some(*value),
+            LixField::Str(_) => None,
         }
+    }
 
-        log_message(level, message);
+    fn as_str(&self) -> Option<&str> {
+        match self {
+            LixField::Int(_) => None,
+            LixField::Str(value) => Some(value.as_str()),
+        }
     }
 }
 
-fn log_message(level: Level, message: &str) {
-    match level {
-        Level::Error => error!("{message}"),
-        Level::Warn => warn!("{message}"),
-        Level::Info => info!("{message}"),
-        Level::Debug => debug!("{message}"),
-        Level::Trace => trace!("{message}"),
+impl Default for PipelineReducer {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
-fn parse_fields(value: Option<&Value>) -> Vec<Field> {
-    let Some(Value::Array(items)) = value else {
-        return Vec::new();
-    };
-
-    items
-        .iter()
-        .filter_map(|item| match item {
-            Value::Number(number) => number.as_u64().map(Field::Int),
-            Value::String(value) => Some(Field::Str(value.clone())),
-            _ => None,
-        })
-        .collect()
+fn phase_name(phase: PipelinePhase) -> &'static str {
+    match phase {
+        PipelinePhase::Evaluate => "evaluating",
+        PipelinePhase::Build => "building",
+        PipelinePhase::Deploy => "deploying",
+    }
 }
 
 fn store_path_to_name(path: &str) -> String {

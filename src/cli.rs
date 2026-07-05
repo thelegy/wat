@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
-use clap_complete::{ArgValueCandidates, Shell, engine::CompletionCandidate};
+use clap_complete::{ArgValueCandidates, engine::CompletionCandidate};
 use log::debug;
 
 use crate::backend;
@@ -41,15 +41,9 @@ pub enum Command {
 
 #[derive(Debug, Args)]
 pub struct CommonBuildArgs {
-    /// The name of the host to operate on
-    #[arg(add = ArgValueCandidates::new(fetch_hostname_candidates))]
-    pub hostname: String,
-}
-
-#[derive(Debug, Args)]
-pub struct CompletionArgs {
-    /// The shell to generate completion scripts for
-    pub shell: Shell,
+    /// The names of the hosts to operate on
+    #[arg(required = true, num_args = 1.., add = ArgValueCandidates::new(fetch_hostname_candidates))]
+    pub hostnames: Vec<String>,
 }
 
 fn fetch_hostname_candidates() -> Vec<CompletionCandidate> {

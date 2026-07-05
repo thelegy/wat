@@ -1,176 +1,388 @@
-use std::path::{Path, PathBuf};
+use std::{path::{Path, PathBuf}, sync::Arc};
 
 use anyhow::{Context, Result, bail};
+use tempfile::{Builder, TempDir};
 use tokio::{
-    fs,
     process::Command,
+    sync::{OwnedSemaphorePermit, Semaphore},
+    task::JoinSet,
 };
-use tempfile::Builder;
 
 use crate::{
     backend::{self, Backend},
     cli::Command as CliCommand,
+    event::{ArtifactEvent, Event, EventBus, EventSender, HostEvent, LogEvent, PipelineEvent, PipelinePhase},
+    planner::{self, HostPlan, PipelinePlan, PlanMode},
+    reporter::{IndicatifReporter, Reporter},
 };
-use log::{info, warn};
 
 pub async fn execute(command: CliCommand) -> Result<()> {
-    let backend_handle = backend::detect();
-    let backend = backend_handle.as_ref();
+    let backend = backend::detect();
+    let plan = planner::plan(&command)?;
+    let (bus, events) = EventBus::new(512);
 
-    match command {
-        CliCommand::Switch(args) => {
-            deploy_activation(backend, &args.hostname, ActivationPlan::SWITCH).await
+    let mut reporter = IndicatifReporter::new();
+    let reporter_handle = tokio::spawn(async move { reporter.run(events).await });
+
+    let result = run_pipeline(backend, plan, bus.sender()).await;
+    drop(bus);
+
+    let reporter_result = reporter_handle
+        .await
+        .context("reporter task failed to join")?;
+    reporter_result?;
+
+    result
+}
+
+async fn run_pipeline(
+    backend: Arc<dyn Backend + Send + Sync>,
+    plan: PipelinePlan,
+    events: EventSender,
+) -> Result<()> {
+    let hostnames: Vec<String> = plan.hosts.iter().map(|host| host.hostname.clone()).collect();
+    events
+        .send(Event::Pipeline(PipelineEvent::Started { hosts: hostnames }))
+        .await?;
+
+    events
+        .send(Event::Log(LogEvent {
+            level: log::Level::Info,
+            message: "Evaluating selected hosts".to_string(),
+        }))
+        .await?;
+    emit_phase(&events, PipelinePhase::Evaluate, &plan.hosts, true).await?;
+    events
+        .send(Event::Pipeline(PipelineEvent::PhaseStarted(PipelinePhase::Build)))
+        .await?;
+    events
+        .send(Event::Log(LogEvent {
+            level: log::Level::Info,
+            message: "Building selected hosts".to_string(),
+        }))
+        .await?;
+
+    let builds = match build_hosts(backend.clone(), &plan.hosts, events.clone()).await {
+        Ok(builds) => builds,
+        Err(error) => {
+            events
+                .send(Event::Pipeline(PipelineEvent::PhaseFinished {
+                    phase: PipelinePhase::Build,
+                    success: false,
+                }))
+                .await?;
+            events
+                .send(Event::Pipeline(PipelineEvent::Finished { success: false }))
+                .await?;
+            return Err(error);
         }
-        CliCommand::Boot(args) => deploy_activation(backend, &args.hostname, ActivationPlan::BOOT).await,
-        CliCommand::Reboot(args) => {
-            deploy_activation(backend, &args.hostname, ActivationPlan::REBOOT).await
+    };
+
+    events
+        .send(Event::Pipeline(PipelineEvent::PhaseFinished {
+            phase: PipelinePhase::Build,
+            success: true,
+        }))
+        .await?;
+
+    match plan.mode {
+        PlanMode::BuildOnly | PlanMode::Artifact => {
+            events
+                .send(Event::Pipeline(PipelineEvent::Finished { success: true }))
+                .await?;
+            Ok(())
         }
-        CliCommand::Test(args) => deploy_activation(backend, &args.hostname, ActivationPlan::TEST).await,
-        CliCommand::DryActivate(args) => {
-            deploy_activation(backend, &args.hostname, ActivationPlan::DRY_ACTIVATE).await
+        PlanMode::Deploy(activation) => {
+            events
+                .send(Event::Pipeline(PipelineEvent::PhaseStarted(PipelinePhase::Deploy)))
+                .await?;
+            events
+                .send(Event::Log(LogEvent {
+                    level: log::Level::Info,
+                    message: "Deploying selected hosts".to_string(),
+                }))
+                .await?;
+            let result = deploy_hosts(backend, &builds, activation, events.clone()).await;
+            match result {
+                Ok(()) => {
+                    events
+                        .send(Event::Pipeline(PipelineEvent::PhaseFinished {
+                            phase: PipelinePhase::Deploy,
+                            success: true,
+                        }))
+                        .await?;
+                    events
+                        .send(Event::Pipeline(PipelineEvent::Finished { success: true }))
+                        .await?;
+                    Ok(())
+                }
+                Err(error) => {
+                    events
+                        .send(Event::Pipeline(PipelineEvent::PhaseFinished {
+                            phase: PipelinePhase::Deploy,
+                            success: false,
+                        }))
+                        .await?;
+                    events
+                        .send(Event::Pipeline(PipelineEvent::Finished { success: false }))
+                        .await?;
+                    Err(error)
+                }
+            }
         }
-        CliCommand::Build(args) => build_only(backend, &args.hostname).await,
-        CliCommand::Iso(args) => build_artifact(backend, &args.hostname, ArtifactKind::Iso).await,
-        CliCommand::Sdcard(args) => build_artifact(backend, &args.hostname, ArtifactKind::Sdcard).await,
     }
 }
 
-enum ArtifactKind {
-    Iso,
-    Sdcard,
+async fn emit_phase(
+    events: &EventSender,
+    phase: PipelinePhase,
+    hosts: &[HostPlan],
+    success: bool,
+) -> Result<()> {
+    events
+        .send(Event::Pipeline(PipelineEvent::PhaseStarted(phase)))
+        .await?;
+
+    for host in hosts {
+        events
+            .send(Event::Host(HostEvent::Started {
+                host: host.hostname.clone(),
+                phase,
+            }))
+            .await?;
+        events
+            .send(Event::Host(HostEvent::Finished {
+                host: host.hostname.clone(),
+                phase,
+                success,
+            }))
+            .await?;
+    }
+
+    events
+        .send(Event::Pipeline(PipelineEvent::PhaseFinished { phase, success }))
+        .await?;
+    Ok(())
 }
 
-async fn build_artifact(backend: &dyn Backend, hostname: &str, kind: ArtifactKind) -> Result<()> {
+async fn build_hosts(
+    backend: Arc<dyn Backend + Send + Sync>,
+    hosts: &[HostPlan],
+    events: EventSender,
+) -> Result<Vec<BuildOutcome>> {
+    let mut tasks = JoinSet::new();
+
+    for host in hosts.iter().cloned() {
+        let backend = backend.clone();
+        let events = events.clone();
+        tasks.spawn(async move { build_host(backend, host, events).await });
+    }
+
+    collect_join_set(tasks).await
+}
+
+async fn build_host(
+    backend: Arc<dyn Backend + Send + Sync>,
+    host: HostPlan,
+    events: EventSender,
+) -> Result<BuildOutcome> {
+    let host_name = host.hostname.clone();
+    let events = events.with_host(host_name.clone()).with_phase(PipelinePhase::Build);
+    events
+        .send(Event::Host(HostEvent::Started {
+            host: host_name.clone(),
+            phase: PipelinePhase::Build,
+        }))
+        .await?;
+
     let temp_dir = Builder::new()
         .prefix("wat-deploy.")
         .tempdir()
         .context("failed to create temporary directory")?;
+    let out_link = temp_dir.path().join(&host.out_link_name);
 
-    let (attr, link_name, info_message) = match kind {
-        ArtifactKind::Iso => (
-            { format!(".#nixosConfigurations.{hostname}.config.system.build.iso") },
-            format!("nixos-iso-{hostname}"),
-            "Building iso image",
-        ),
-        ArtifactKind::Sdcard => (
-            { format!(".#nixosConfigurations.{hostname}.config.system.build.sdImage") },
-            format!("nixos-sdcard-{hostname}"),
-            "Building sdcard image",
-        ),
-    };
+    let result = async {
+        backend
+            .build_installable(&host.installable, &out_link, host.keep_going, events.clone())
+            .await
+            .with_context(|| format!("failed to build {}", host.installable))?;
 
-    info!("{info_message}");
+        let store_path = resolve_store_path(&out_link).await?;
 
-    let out_link = temp_dir.path().join(link_name);
-    backend
-        .build_installable(&attr, &out_link, false)
-        .await
-        .with_context(|| format!("failed to build {attr}"))?;
+        events
+            .send(Event::Artifact(ArtifactEvent::Ready {
+                host: host_name.clone(),
+                path: store_path.clone(),
+            }))
+            .await?;
 
-    let realized = resolve_store_path(&out_link).await?;
-    println!("{}", realized.display());
-    Ok(())
+        events
+            .send(Event::Host(HostEvent::Finished {
+                host: host_name.clone(),
+                phase: PipelinePhase::Build,
+                success: true,
+            }))
+            .await?;
+
+        Ok(BuildOutcome {
+            host: host_name.clone(),
+            store_path,
+            _temp_dir: temp_dir,
+        })
+    }
+    .await;
+
+    if let Err(error) = &result {
+        let _ = events
+            .send(Event::Host(HostEvent::Finished {
+                host: host_name,
+                phase: PipelinePhase::Build,
+                success: false,
+            }))
+            .await;
+        return Err(anyhow::anyhow!("{error}"));
+    }
+
+    result
 }
 
-async fn build_only(backend: &dyn Backend, hostname: &str) -> Result<()> {
-    let (store_path, _temp_dir) = build_toplevel(backend, hostname).await?;
-    info!("Build completed");
-    println!("{}", store_path.display());
-    Ok(())
-}
-
-async fn deploy_activation(backend: &dyn Backend, hostname: &str, plan: ActivationPlan) -> Result<()> {
-    let (store_path, _temp_dir) = build_toplevel(backend, hostname).await?;
-
+async fn deploy_hosts(
+    backend: Arc<dyn Backend + Send + Sync>,
+    builds: &[BuildOutcome],
+    activation: planner::ActivationPlan,
+    events: EventSender,
+) -> Result<()> {
+    let concurrency = deploy_concurrency();
+    let semaphore = Arc::new(Semaphore::new(concurrency));
     let local_hostname = run_command_output("hostname", &[]).await?.trim().to_string();
-    let is_target_host = local_hostname == hostname;
+    let mut tasks = JoinSet::new();
 
-    info!("Deploying target system configuration");
+    for build in builds.iter() {
+        let permit = semaphore.clone().acquire_owned().await?;
+        let backend = backend.clone();
+        let events = events.clone();
+        let hostname = build.host.clone();
+        let store_path = build.store_path.clone();
+        let local_hostname = local_hostname.clone();
+        tasks.spawn(async move {
+            deploy_host(
+                backend,
+                hostname,
+                store_path,
+                activation,
+                local_hostname,
+                permit,
+                events,
+            )
+            .await
+        });
+    }
 
-    if is_target_host {
-        deploy_local(&store_path, plan).await?;
+    collect_join_set(tasks).await.map(|_| ())
+}
+
+async fn deploy_host(
+    backend: Arc<dyn Backend + Send + Sync>,
+    hostname: String,
+    store_path: PathBuf,
+    activation: planner::ActivationPlan,
+    local_hostname: String,
+    _permit: OwnedSemaphorePermit,
+    events: EventSender,
+) -> Result<()> {
+    let host_name = hostname.clone();
+    let events = events.with_host(host_name.clone()).with_phase(PipelinePhase::Deploy);
+    events
+        .send(Event::Host(HostEvent::Started {
+            host: host_name.clone(),
+            phase: PipelinePhase::Deploy,
+        }))
+        .await?;
+
+    let result = async {
+        if local_hostname == host_name {
+            deploy_local(&store_path, activation).await?;
+        } else {
+            deploy_remote(backend.clone(), &host_name, &store_path, activation, events.clone()).await?;
+        }
+
+        events
+            .send(Event::Host(HostEvent::Finished {
+                host: host_name.clone(),
+                phase: PipelinePhase::Deploy,
+                success: true,
+            }))
+            .await?;
+        Ok(())
+    }
+    .await;
+
+    if let Err(error) = &result {
+        let _ = events
+            .send(Event::Host(HostEvent::Finished {
+                host: host_name,
+                phase: PipelinePhase::Deploy,
+                success: false,
+            }))
+            .await;
+        return Err(anyhow::anyhow!("{error}"));
+    }
+
+    result
+}
+
+struct BuildOutcome {
+    host: String,
+    store_path: PathBuf,
+    _temp_dir: TempDir,
+}
+
+async fn collect_join_set<T: 'static>(mut tasks: JoinSet<Result<T>>) -> Result<Vec<T>> {
+    let mut results = Vec::new();
+    let mut first_error = None;
+
+    while let Some(join_result) = tasks.join_next().await {
+        match join_result {
+            Ok(Ok(item)) => results.push(item),
+            Ok(Err(error)) if first_error.is_none() => first_error = Some(error),
+            Ok(Err(_)) => {}
+            Err(error) => {
+                if first_error.is_none() {
+                    first_error = Some(anyhow::anyhow!("task join failed: {error}"));
+                }
+            }
+        }
+    }
+
+    if let Some(error) = first_error {
+        Err(error)
     } else {
-        deploy_remote(backend, hostname, &store_path, plan).await?;
+        Ok(results)
     }
-
-    if plan.reboot {
-        warn!("Reboot triggered");
-    }
-
-    info!("Update completed");
-    Ok(())
 }
 
-#[derive(Clone, Copy)]
-struct ActivationPlan {
-    command: &'static str,
-    set_profile: bool,
-    reboot: bool,
-}
-
-impl ActivationPlan {
-    const SWITCH: Self = Self {
-        command: "switch",
-        set_profile: true,
-        reboot: false,
-    };
-
-    const BOOT: Self = Self {
-        command: "boot",
-        set_profile: true,
-        reboot: false,
-    };
-
-    const REBOOT: Self = Self {
-        command: "boot",
-        set_profile: true,
-        reboot: true,
-    };
-
-    const TEST: Self = Self {
-        command: "test",
-        set_profile: false,
-        reboot: false,
-    };
-
-    const DRY_ACTIVATE: Self = Self {
-        command: "dry-activate",
-        set_profile: false,
-        reboot: false,
-    };
-}
-
-async fn build_toplevel(backend: &dyn Backend, hostname: &str) -> Result<(PathBuf, tempfile::TempDir)> {
-    info!("Building target system configuration");
-
-    let temp_dir = Builder::new()
-        .prefix("wat-deploy.")
-        .tempdir()
-        .context("failed to create temporary directory")?;
-
-    let out_link = temp_dir.path().join(format!("nixos-config-{hostname}"));
-    let attr = { format!(".#nixosConfigurations.{hostname}.config.system.build.toplevel") };
-
-    backend
-        .build_installable(&attr, &out_link, true)
-        .await
-        .with_context(|| format!("failed to build {attr}"))?;
-
-    let realized = resolve_store_path(&out_link).await?;
-    Ok((realized, temp_dir))
+fn deploy_concurrency() -> usize {
+    std::env::var("WAT_DEPLOY_CONCURRENCY")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(4)
 }
 
 async fn resolve_store_path(link: &Path) -> Result<PathBuf> {
-    if !fs::try_exists(link).await.context("failed to check build output link")? {
+    if !tokio::fs::try_exists(link)
+        .await
+        .context("failed to check build output link")?
+    {
         bail!("build output link {} does not exist", link.display());
     }
 
-    fs::canonicalize(link)
+    tokio::fs::canonicalize(link)
         .await
         .with_context(|| format!("failed to resolve store path for {}", link.display()))
 }
 
-async fn deploy_local(store_path: &Path, plan: ActivationPlan) -> Result<()> {
+async fn deploy_local(store_path: &Path, plan: planner::ActivationPlan) -> Result<()> {
     let store_path_str = store_path
         .to_str()
         .context("store path contains invalid UTF-8")?;
@@ -188,8 +400,7 @@ async fn deploy_local(store_path: &Path, plan: ActivationPlan) -> Result<()> {
     let switch_to_config = switch_to_config
         .to_str()
         .context("switch-to-configuration path contains invalid UTF-8")?;
-    let command = plan.command;
-    run_command_status("sudo", &[switch_to_config, command])
+    run_command_status("sudo", &[switch_to_config, plan.command])
         .await
         .with_context(|| format!("failed to run switch-to-configuration {}", plan.command))?;
 
@@ -203,14 +414,15 @@ async fn deploy_local(store_path: &Path, plan: ActivationPlan) -> Result<()> {
 }
 
 async fn deploy_remote(
-    backend: &dyn Backend,
+    backend: Arc<dyn Backend + Send + Sync>,
     hostname: &str,
     store_path: &Path,
-    plan: ActivationPlan,
+    plan: planner::ActivationPlan,
+    events: EventSender,
 ) -> Result<()> {
     let remote_store = format!("ssh://root@{hostname}");
     backend
-        .copy_closure(store_path, remote_store.as_str(), true)
+        .copy_closure(store_path, remote_store.as_str(), true, events)
         .await
         .with_context(|| format!("failed to copy store path to {hostname}"))?;
 

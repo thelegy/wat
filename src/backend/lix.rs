@@ -10,7 +10,9 @@ use tokio::{
     process::Command,
 };
 
-use super::{Backend, lix_renderer::LixRenderer};
+use crate::event::EventSender;
+
+use super::{Backend, lix_parser::LixEventAdapter};
 
 pub struct LixBackend {
     binary: String,
@@ -39,6 +41,7 @@ impl Backend for LixBackend {
         installable: &str,
         out_link: &Path,
         keep_going: bool,
+        events: EventSender,
     ) -> Result<()> {
         let mut command = self.command();
         command.args(["--log-format", "internal-json", "build"]);
@@ -48,7 +51,7 @@ impl Backend for LixBackend {
         command.arg(installable);
         command.arg("--out-link");
         command.arg(out_link);
-        execute_command(&mut command).await
+        execute_command(&mut command, events).await
     }
 
     async fn copy_closure(
@@ -56,6 +59,7 @@ impl Backend for LixBackend {
         source: &Path,
         destination: &str,
         substitute_on_destination: bool,
+        events: EventSender,
     ) -> Result<()> {
         let mut command = self.command();
         command.args(["--log-format", "internal-json", "copy"]);
@@ -65,7 +69,7 @@ impl Backend for LixBackend {
         command.arg("--to");
         command.arg(destination);
         command.arg(source);
-        execute_command(&mut command).await
+        execute_command(&mut command, events).await
     }
 
     async fn list_machines(&self) -> Result<Vec<String>> {
@@ -104,7 +108,7 @@ impl Backend for LixBackend {
 
 }
 
-async fn execute_command(command: &mut Command) -> Result<()> {
+async fn execute_command(command: &mut Command, events: EventSender) -> Result<()> {
     command.stdout(Stdio::null());
     command.stderr(Stdio::piped());
 
@@ -115,13 +119,13 @@ async fn execute_command(command: &mut Command) -> Result<()> {
         .take()
         .context("failed to capture command stderr")?;
 
-    let mut renderer = LixRenderer::new();
+    let mut renderer = LixEventAdapter::new(events);
 
     let mut lines = BufReader::new(stderr).lines();
     let mut read_error = None;
     loop {
         match lines.next_line().await {
-            Ok(Some(line)) => renderer.handle_stderr_line(&line),
+            Ok(Some(line)) => renderer.handle_stderr_line(&line).await?,
             Ok(None) => break,
             Err(error) => {
                 read_error = Some(error);
@@ -133,7 +137,9 @@ async fn execute_command(command: &mut Command) -> Result<()> {
     let status = child.wait().await.with_context(|| "failed to wait for lix")?;
 
     if let Some(error) = read_error {
-        log::warn!("failed reading stderr from lix: {error}");
+        renderer
+            .log_warning(&format!("failed reading stderr from lix: {error}"))
+            .await?;
     }
 
     renderer.finish(status.success());

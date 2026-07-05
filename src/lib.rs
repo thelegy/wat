@@ -1,21 +1,30 @@
+mod event;
 mod backend;
 pub mod cli;
 mod operations;
+mod planner;
+mod reducer;
+mod reporter;
 
 use std::{path::Path, sync::Once};
 
 use anyhow::{Result, bail};
-use clap::{CommandFactory, Parser};
-use clap_complete::CompleteEnv;
+use clap::Parser;
 
 static INIT_LOGGER: Once = Once::new();
 
 pub async fn run() -> Result<()> {
-    CompleteEnv::with_factory(cli::Cli::command).complete();
     init_logging();
     let cli = cli::Cli::parse();
     prepare_environment()?;
     operations::execute(cli.command).await
+}
+
+pub fn complete() {
+    use clap::CommandFactory;
+    use clap_complete::CompleteEnv;
+
+    CompleteEnv::with_factory(cli::Cli::command).complete();
 }
 
 fn init_logging() {

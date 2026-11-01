@@ -35,3 +35,25 @@ Hostname completion is not recorded.
 
 Recordings can contain sensitive command output and host information. Automatic
 recordings are private files; remove recordings when no longer needed.
+
+## Connections
+
+All targets use SSH as `root@<hostname>` by default, including the local machine.
+Optionally create `.wat/config.toml` alongside the `flake.nix` in the directory
+where you invoke `wat`:
+
+```toml
+connection = "ssh"
+
+[hosts.my-local-host]
+connection = "sudo"
+```
+
+`connection` sets the default; `[hosts.<hostname>]` overrides it for an exact
+host name. `ssh` copies the closure and activates over SSH. `sudo` activates on
+the machine running `wat`, so use it only for local targets. To retain the old
+behavior, add a `sudo` override for your local host and leave the default as SSH.
+
+The config library also supports `.wat/config.json`, `.yaml`, `.yml`, `.ini`,
+`.ron`, `.json5`, and `.corn`. Use one configuration file. Missing files and
+omitted settings use defaults; malformed files and unknown settings are errors.

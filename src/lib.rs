@@ -1,5 +1,6 @@
 mod backend;
 pub mod cli;
+mod config;
 mod event;
 mod operations;
 mod planner;

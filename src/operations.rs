@@ -23,6 +23,7 @@ use crate::{
 };
 
 pub async fn execute(command: CliCommand) -> Result<()> {
+    let config = crate::config::Config::load(Path::new("."))?;
     let backend = backend::detect();
     let plan = planner::plan(&command)?;
     let (bus, events) = EventBus::new(512);
@@ -30,7 +31,7 @@ pub async fn execute(command: CliCommand) -> Result<()> {
     let mut reporter = IndicatifReporter::new();
     let reporter_handle = tokio::spawn(async move { reporter.run(events).await });
 
-    let result = run_pipeline(backend, plan, bus.sender()).await;
+    let result = run_pipeline(backend, plan, config, bus.sender()).await;
     drop(bus);
 
     let reporter_result = reporter_handle
@@ -44,6 +45,7 @@ pub async fn execute(command: CliCommand) -> Result<()> {
 async fn run_pipeline(
     backend: Arc<dyn Backend + Send + Sync>,
     plan: PipelinePlan,
+    config: crate::config::Config,
     events: EventSender,
 ) -> Result<()> {
     let hostnames: Vec<String> = plan
@@ -116,7 +118,7 @@ async fn run_pipeline(
                     message: "Deploying selected hosts".to_string(),
                 }))
                 .await?;
-            let result = deploy_hosts(backend, &builds, activation, events.clone()).await;
+            let result = deploy_hosts(backend, &builds, activation, &config, events.clone()).await;
             match result {
                 Ok(()) => {
                     events
@@ -274,14 +276,11 @@ async fn deploy_hosts(
     backend: Arc<dyn Backend + Send + Sync>,
     builds: &[BuildOutcome],
     activation: planner::ActivationPlan,
+    config: &crate::config::Config,
     events: EventSender,
 ) -> Result<()> {
     let concurrency = deploy_concurrency();
     let semaphore = Arc::new(Semaphore::new(concurrency));
-    let local_hostname = run_command_output("hostname", &[])
-        .await?
-        .trim()
-        .to_string();
     let mut tasks = JoinSet::new();
 
     for build in builds.iter() {
@@ -290,16 +289,10 @@ async fn deploy_hosts(
         let events = events.clone();
         let hostname = build.host.clone();
         let store_path = build.store_path.clone();
-        let local_hostname = local_hostname.clone();
+        let connection = config.connection_for(&hostname);
         tasks.spawn(async move {
             deploy_host(
-                backend,
-                hostname,
-                store_path,
-                activation,
-                local_hostname,
-                permit,
-                events,
+                backend, hostname, store_path, activation, connection, permit, events,
             )
             .await
         });
@@ -313,7 +306,7 @@ async fn deploy_host(
     hostname: String,
     store_path: PathBuf,
     activation: planner::ActivationPlan,
-    local_hostname: String,
+    connection: crate::config::Connection,
     _permit: OwnedSemaphorePermit,
     events: EventSender,
 ) -> Result<()> {
@@ -329,7 +322,7 @@ async fn deploy_host(
         .await?;
 
     let result = async {
-        if local_hostname == host_name {
+        if connection == crate::config::Connection::Sudo {
             deploy_local(&store_path, activation).await?;
         } else {
             deploy_remote(
@@ -500,44 +493,6 @@ async fn deploy_remote(
     }
 
     Ok(())
-}
-
-async fn run_command_output(program: &str, args: &[&str]) -> Result<String> {
-    let mut command = Command::new(program);
-    command.args(args);
-    let id = crate::recording::start(&command);
-    let output = command
-        .output()
-        .await
-        .with_context(|| format!("failed to run {program}"))?;
-    crate::recording::raw(
-        &Default::default(),
-        id,
-        "captured_stdout",
-        &output.stdout,
-        false,
-    );
-    crate::recording::raw(
-        &Default::default(),
-        id,
-        "captured_stderr",
-        &output.stderr,
-        false,
-    );
-    crate::recording::write(
-        serde_json::json!({"kind": "exit", "command": id, "success": output.status.success(), "code": output.status.code()}),
-    );
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!(
-            "{program} exited with status {}: {}",
-            output.status,
-            stderr.trim()
-        );
-    }
-
-    String::from_utf8(output.stdout).context("command output contained invalid UTF-8")
 }
 
 async fn run_command_status(program: &str, args: &[&str]) -> Result<()> {

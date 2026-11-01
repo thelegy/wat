@@ -68,6 +68,7 @@ pub struct PipelinePlan {
 
 pub fn plan(command: &CliCommand) -> Result<PipelinePlan> {
     match command {
+        CliCommand::Replay { .. } => anyhow::bail!("replay does not create a deployment plan"),
         CliCommand::Switch(args) => deploy_plan(args, ActivationPlan::SWITCH),
         CliCommand::Boot(args) => deploy_plan(args, ActivationPlan::BOOT),
         CliCommand::Reboot(args) => deploy_plan(args, ActivationPlan::REBOOT),

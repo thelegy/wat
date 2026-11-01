@@ -14,6 +14,10 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    /// Replay a recorded run without executing any commands
+    #[command(hide = true)]
+    Replay { path: std::path::PathBuf },
+
     /// Build, switch, and test configuration on target host
     Switch(CommonBuildArgs),
 

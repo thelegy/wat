@@ -1,8 +1,9 @@
-mod event;
 mod backend;
 pub mod cli;
+mod event;
 mod operations;
 mod planner;
+mod recording;
 mod reducer;
 mod reporter;
 
@@ -16,8 +17,16 @@ static INIT_LOGGER: Once = Once::new();
 pub async fn run() -> Result<()> {
     init_logging();
     let cli = cli::Cli::parse();
+    if let cli::Command::Replay { path } = &cli.command {
+        return recording::replay(path).await;
+    }
     prepare_environment()?;
-    operations::execute(cli.command).await
+    recording::init()?;
+    let result = operations::execute(cli.command).await;
+    recording::write(
+        serde_json::json!({"kind": "outcome", "error": result.as_ref().err().map(|error| format!("{error}"))}),
+    );
+    result
 }
 
 pub fn complete() {

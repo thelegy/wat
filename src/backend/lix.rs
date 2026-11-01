@@ -1,7 +1,4 @@
-use std::{
-    path::Path,
-    process::Stdio,
-};
+use std::{path::Path, process::Stdio};
 
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
@@ -105,28 +102,51 @@ impl Backend for LixBackend {
         hostnames.sort();
         Ok(hostnames)
     }
-
 }
 
 async fn execute_command(command: &mut Command, events: EventSender) -> Result<()> {
-    command.stdout(Stdio::null());
+    let id = crate::recording::start(command);
+    let scope = events.scope().clone();
+    command.stdout(Stdio::piped());
     command.stderr(Stdio::piped());
 
     let mut child = command.spawn().with_context(|| "failed to execute lix")?;
 
+    let stdout = child.stdout.take().context("missing stdout")?;
+    let stdout_scope = scope.clone();
+    let stdout_task = tokio::spawn(async move {
+        use tokio::io::AsyncReadExt;
+        let mut stdout = stdout;
+        let mut bytes = [0; 8192];
+        loop {
+            let count = stdout.read(&mut bytes).await?;
+            if count == 0 {
+                break;
+            }
+            crate::recording::raw(&stdout_scope, id, "stdout", &bytes[..count], true);
+        }
+        Ok::<_, std::io::Error>(())
+    });
     let stderr = child
         .stderr
         .take()
         .context("failed to capture command stderr")?;
 
-    let mut renderer = LixEventAdapter::new(events);
+    let mut renderer = LixEventAdapter::new(events.unrecorded());
 
-    let mut lines = BufReader::new(stderr).lines();
+    let mut lines = BufReader::new(stderr);
+    let mut bytes = Vec::new();
     let mut read_error = None;
     loop {
-        match lines.next_line().await {
-            Ok(Some(line)) => renderer.handle_stderr_line(&line).await?,
-            Ok(None) => break,
+        bytes.clear();
+        match lines.read_until(b'\n', &mut bytes).await {
+            Ok(0) => break,
+            Ok(_) => {
+                crate::recording::raw(&scope, id, "stderr", &bytes, true);
+                renderer
+                    .handle_stderr_line(String::from_utf8_lossy(&bytes).trim_end_matches('\n'))
+                    .await?;
+            }
             Err(error) => {
                 read_error = Some(error);
                 break;
@@ -134,8 +154,15 @@ async fn execute_command(command: &mut Command, events: EventSender) -> Result<(
         }
     }
 
-    let status = child.wait().await.with_context(|| "failed to wait for lix")?;
+    let status = child
+        .wait()
+        .await
+        .with_context(|| "failed to wait for lix")?;
 
+    stdout_task.await??;
+    crate::recording::write(
+        serde_json::json!({"kind": "exit", "command": id, "success": status.success(), "code": status.code()}),
+    );
     if let Some(error) = read_error {
         renderer
             .log_warning(&format!("failed reading stderr from lix: {error}"))

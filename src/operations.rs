@@ -1,4 +1,7 @@
-use std::{path::{Path, PathBuf}, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use anyhow::{Context, Result, bail};
 use tempfile::{Builder, TempDir};
@@ -11,7 +14,10 @@ use tokio::{
 use crate::{
     backend::{self, Backend},
     cli::Command as CliCommand,
-    event::{ArtifactEvent, Event, EventBus, EventSender, HostEvent, LogEvent, PipelineEvent, PipelinePhase},
+    event::{
+        ArtifactEvent, Event, EventBus, EventSender, HostEvent, LogEvent, PipelineEvent,
+        PipelinePhase,
+    },
     planner::{self, HostPlan, PipelinePlan, PlanMode},
     reporter::{IndicatifReporter, Reporter},
 };
@@ -40,7 +46,11 @@ async fn run_pipeline(
     plan: PipelinePlan,
     events: EventSender,
 ) -> Result<()> {
-    let hostnames: Vec<String> = plan.hosts.iter().map(|host| host.hostname.clone()).collect();
+    let hostnames: Vec<String> = plan
+        .hosts
+        .iter()
+        .map(|host| host.hostname.clone())
+        .collect();
     events
         .send(Event::Pipeline(PipelineEvent::Started { hosts: hostnames }))
         .await?;
@@ -53,7 +63,9 @@ async fn run_pipeline(
         .await?;
     emit_phase(&events, PipelinePhase::Evaluate, &plan.hosts, true).await?;
     events
-        .send(Event::Pipeline(PipelineEvent::PhaseStarted(PipelinePhase::Build)))
+        .send(Event::Pipeline(PipelineEvent::PhaseStarted(
+            PipelinePhase::Build,
+        )))
         .await?;
     events
         .send(Event::Log(LogEvent {
@@ -94,7 +106,9 @@ async fn run_pipeline(
         }
         PlanMode::Deploy(activation) => {
             events
-                .send(Event::Pipeline(PipelineEvent::PhaseStarted(PipelinePhase::Deploy)))
+                .send(Event::Pipeline(PipelineEvent::PhaseStarted(
+                    PipelinePhase::Deploy,
+                )))
                 .await?;
             events
                 .send(Event::Log(LogEvent {
@@ -160,7 +174,10 @@ async fn emit_phase(
     }
 
     events
-        .send(Event::Pipeline(PipelineEvent::PhaseFinished { phase, success }))
+        .send(Event::Pipeline(PipelineEvent::PhaseFinished {
+            phase,
+            success,
+        }))
         .await?;
     Ok(())
 }
@@ -187,7 +204,9 @@ async fn build_host(
     events: EventSender,
 ) -> Result<BuildOutcome> {
     let host_name = host.hostname.clone();
-    let events = events.with_host(host_name.clone()).with_phase(PipelinePhase::Build);
+    let events = events
+        .with_host(host_name.clone())
+        .with_phase(PipelinePhase::Build);
     events
         .send(Event::Host(HostEvent::Started {
             host: host_name.clone(),
@@ -203,7 +222,12 @@ async fn build_host(
 
     let result = async {
         backend
-            .build_installable(&host.installable, &out_link, host.keep_going, events.clone())
+            .build_installable(
+                &host.installable,
+                &out_link,
+                host.keep_going,
+                events.clone(),
+            )
             .await
             .with_context(|| format!("failed to build {}", host.installable))?;
 
@@ -254,7 +278,10 @@ async fn deploy_hosts(
 ) -> Result<()> {
     let concurrency = deploy_concurrency();
     let semaphore = Arc::new(Semaphore::new(concurrency));
-    let local_hostname = run_command_output("hostname", &[]).await?.trim().to_string();
+    let local_hostname = run_command_output("hostname", &[])
+        .await?
+        .trim()
+        .to_string();
     let mut tasks = JoinSet::new();
 
     for build in builds.iter() {
@@ -291,7 +318,9 @@ async fn deploy_host(
     events: EventSender,
 ) -> Result<()> {
     let host_name = hostname.clone();
-    let events = events.with_host(host_name.clone()).with_phase(PipelinePhase::Deploy);
+    let events = events
+        .with_host(host_name.clone())
+        .with_phase(PipelinePhase::Deploy);
     events
         .send(Event::Host(HostEvent::Started {
             host: host_name.clone(),
@@ -303,7 +332,14 @@ async fn deploy_host(
         if local_hostname == host_name {
             deploy_local(&store_path, activation).await?;
         } else {
-            deploy_remote(backend.clone(), &host_name, &store_path, activation, events.clone()).await?;
+            deploy_remote(
+                backend.clone(),
+                &host_name,
+                &store_path,
+                activation,
+                events.clone(),
+            )
+            .await?;
         }
 
         events
@@ -390,7 +426,13 @@ async fn deploy_local(store_path: &Path, plan: planner::ActivationPlan) -> Resul
     if plan.set_profile {
         run_command_status(
             "sudo",
-            &["nix-env", "--profile", "/nix/var/nix/profiles/system", "--set", store_path_str],
+            &[
+                "nix-env",
+                "--profile",
+                "/nix/var/nix/profiles/system",
+                "--set",
+                store_path_str,
+            ],
         )
         .await
         .context("failed to set system profile")?;
@@ -404,10 +446,14 @@ async fn deploy_local(store_path: &Path, plan: planner::ActivationPlan) -> Resul
         .await
         .with_context(|| format!("failed to run switch-to-configuration {}", plan.command))?;
 
-    run_command_status("sync", &[]).await.context("failed to sync filesystem")?;
+    run_command_status("sync", &[])
+        .await
+        .context("failed to sync filesystem")?;
 
     if plan.reboot {
-        run_command_status("sudo", &["systemctl", "reboot"]).await.context("failed to reboot host")?;
+        run_command_status("sudo", &["systemctl", "reboot"])
+            .await
+            .context("failed to reboot host")?;
     }
 
     Ok(())
@@ -457,28 +503,47 @@ async fn deploy_remote(
 }
 
 async fn run_command_output(program: &str, args: &[&str]) -> Result<String> {
-    let output = Command::new(program)
-        .args(args)
+    let mut command = Command::new(program);
+    command.args(args);
+    let id = crate::recording::start(&command);
+    let output = command
         .output()
         .await
         .with_context(|| format!("failed to run {program}"))?;
+    crate::recording::raw(
+        &Default::default(),
+        id,
+        "captured_stdout",
+        &output.stdout,
+        false,
+    );
+    crate::recording::raw(
+        &Default::default(),
+        id,
+        "captured_stderr",
+        &output.stderr,
+        false,
+    );
+    crate::recording::write(
+        serde_json::json!({"kind": "exit", "command": id, "success": output.status.success(), "code": output.status.code()}),
+    );
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!("{program} exited with status {}: {}", output.status, stderr.trim());
+        bail!(
+            "{program} exited with status {}: {}",
+            output.status,
+            stderr.trim()
+        );
     }
 
     String::from_utf8(output.stdout).context("command output contained invalid UTF-8")
 }
 
 async fn run_command_status(program: &str, args: &[&str]) -> Result<()> {
-    let status = Command::new(program)
-        .args(args)
-        .stderr(std::process::Stdio::inherit())
-        .stdout(std::process::Stdio::inherit())
-        .status()
-        .await
-        .with_context(|| format!("failed to run {program}"))?;
+    let mut command = Command::new(program);
+    command.args(args);
+    let status = crate::recording::execute_visible(&mut command).await?;
 
     if status.success() {
         Ok(())

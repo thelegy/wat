@@ -22,9 +22,10 @@ impl LixEventAdapter {
         if let Some(json_line) = line.strip_prefix("@nix ") {
             match serde_json::from_str::<Value>(json_line) {
                 Ok(value) => self.handle_json(value).await,
-                Err(error) => self
-                    .log(Level::Warn, &format!("invalid nix log JSON: {error}"))
-                    .await?,
+                Err(error) => {
+                    self.log(Level::Warn, &format!("invalid nix log JSON: {error}"))
+                        .await?
+                }
             }
             return Ok(());
         }
@@ -60,7 +61,10 @@ impl LixEventAdapter {
             }
             "start" => {
                 if let Some(event) = self.parse_start(&value) {
-                    let _ = self.events.send(Event::Backend(BackendEvent::Lix(event))).await;
+                    let _ = self
+                        .events
+                        .send(Event::Backend(BackendEvent::Lix(event)))
+                        .await;
                 }
             }
             "stop" => {
@@ -73,7 +77,10 @@ impl LixEventAdapter {
             }
             "result" => {
                 if let Some(event) = self.parse_result(&value) {
-                    let _ = self.events.send(Event::Backend(BackendEvent::Lix(event))).await;
+                    let _ = self
+                        .events
+                        .send(Event::Backend(BackendEvent::Lix(event)))
+                        .await;
                 }
             }
             _ => {}

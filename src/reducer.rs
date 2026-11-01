@@ -1,8 +1,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::event::{
-    BackendEvent, EventEnvelope, HostEvent, LixEvent, LixField, PipelineEvent,
-    PipelinePhase,
+    BackendEvent, EventEnvelope, HostEvent, LixEvent, LixField, PipelineEvent, PipelinePhase,
 };
 
 const ACT_COPY_PATH: u64 = 100;

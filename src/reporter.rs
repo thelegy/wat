@@ -72,7 +72,9 @@ impl IndicatifReporter {
             });
 
             let mut message = host.message.clone();
-            if let Some(phase) = host.phase && message.is_empty() {
+            if let Some(phase) = host.phase
+                && message.is_empty()
+            {
                 message = format_phase(phase, &host.host);
             }
             bar.set_message(message);
@@ -180,15 +182,18 @@ impl Reporter for IndicatifReporter {
 }
 
 fn summary_style() -> ProgressStyle {
-    ProgressStyle::with_template("{spinner:.cyan} {msg}").unwrap_or_else(|_| ProgressStyle::default_spinner())
+    ProgressStyle::with_template("{spinner:.cyan} {msg}")
+        .unwrap_or_else(|_| ProgressStyle::default_spinner())
 }
 
 fn host_style() -> ProgressStyle {
-    ProgressStyle::with_template("{spinner:.green} {msg}").unwrap_or_else(|_| ProgressStyle::default_spinner())
+    ProgressStyle::with_template("{spinner:.green} {msg}")
+        .unwrap_or_else(|_| ProgressStyle::default_spinner())
 }
 
 fn activity_style() -> ProgressStyle {
-    ProgressStyle::with_template("{spinner:.yellow} {msg}").unwrap_or_else(|_| ProgressStyle::default_spinner())
+    ProgressStyle::with_template("{spinner:.yellow} {msg}")
+        .unwrap_or_else(|_| ProgressStyle::default_spinner())
 }
 
 fn format_phase(phase: crate::event::PipelinePhase, host: &str) -> String {

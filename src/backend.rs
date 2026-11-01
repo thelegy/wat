@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use crate::event::EventSender;
 
 mod lix;
-mod lix_parser;
+pub(crate) mod lix_parser;
 
 use lix::LixBackend;
 

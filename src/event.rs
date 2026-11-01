@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use log::Level;
 use tokio::sync::mpsc;
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Default, PartialEq, Eq)]
 pub struct EventScope {
     pub host: Option<String>,
     pub phase: Option<PipelinePhase>,
@@ -19,13 +19,13 @@ impl EventScope {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub struct EventEnvelope {
     pub scope: EventScope,
     pub event: Event,
 }
 
-#[derive(Debug, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub enum Event {
     Pipeline(PipelineEvent),
     Host(HostEvent),
@@ -34,7 +34,7 @@ pub enum Event {
     Artifact(ArtifactEvent),
 }
 
-#[derive(Debug, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub enum PipelineEvent {
     Started { hosts: Vec<String> },
     PhaseStarted(PipelinePhase),
@@ -42,36 +42,43 @@ pub enum PipelineEvent {
     Finished { success: bool },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PipelinePhase {
     Evaluate,
     Build,
     Deploy,
 }
 
-#[derive(Debug, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub enum HostEvent {
-    Started { host: String, phase: PipelinePhase },
-    Finished { host: String, phase: PipelinePhase, success: bool },
+    Started {
+        host: String,
+        phase: PipelinePhase,
+    },
+    Finished {
+        host: String,
+        phase: PipelinePhase,
+        success: bool,
+    },
 }
 
-#[derive(Debug, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub enum ArtifactEvent {
     Ready { host: String, path: PathBuf },
 }
 
-#[derive(Debug, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub struct LogEvent {
     pub level: Level,
     pub message: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub enum BackendEvent {
     Lix(LixEvent),
 }
 
-#[derive(Debug, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub enum LixEvent {
     Start {
         id: u64,
@@ -81,7 +88,9 @@ pub enum LixEvent {
         text: String,
         fields: Vec<LixField>,
     },
-    Stop { id: u64 },
+    Stop {
+        id: u64,
+    },
     Result {
         id: u64,
         result_type: u64,
@@ -89,7 +98,7 @@ pub enum LixEvent {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub enum LixField {
     Int(u64),
     Str(String),
@@ -99,6 +108,7 @@ pub enum LixField {
 pub struct EventSender {
     tx: mpsc::Sender<EventEnvelope>,
     scope: EventScope,
+    record: bool,
 }
 
 impl EventSender {
@@ -106,6 +116,7 @@ impl EventSender {
         Self {
             tx,
             scope: EventScope::default(),
+            record: true,
         }
     }
 
@@ -127,10 +138,26 @@ impl EventSender {
         Self {
             tx: self.tx.clone(),
             scope: self.scope.merge(overlay),
+            record: self.record,
         }
     }
 
+    pub fn unrecorded(&self) -> Self {
+        let mut sender = self.clone();
+        sender.record = false;
+        sender
+    }
+
+    pub fn scope(&self) -> &EventScope {
+        &self.scope
+    }
+
     pub async fn send(&self, event: Event) -> Result<()> {
+        if self.record {
+            crate::recording::write(
+                serde_json::json!({"kind": "event", "envelope": EventEnvelope { scope: self.scope.clone(), event: event.clone() }}),
+            );
+        }
         self.tx
             .send(EventEnvelope {
                 scope: self.scope.clone(),

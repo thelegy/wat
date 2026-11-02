@@ -68,3 +68,42 @@ fn failed_build_replays_raw_input_without_executing_commands() {
         1
     );
 }
+
+#[test]
+fn replay_joins_output_chunks_and_finishes_partial_lines() {
+    use serde_json::json;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("output.jsonl");
+    let mut entries = vec![json!({"version": 1})];
+    for (command, stream, bytes) in [
+        (1, "stderr", b"Checking switch inhibitors...".as_slice()),
+        (2, "stdout", b"other host\n".as_slice()),
+        (1, "stderr", b" done\ntrailing error".as_slice()),
+        (1, "stdout", b"trailing output".as_slice()),
+    ] {
+        entries.push(
+            json!({"kind": "output", "elapsed_us": 0, "command": command,
+            "stream": stream, "bytes": bytes, "lix": false}),
+        );
+    }
+    entries.push(json!({"kind": "exit", "elapsed_us": 0, "command": 1, "success": true}));
+    std::fs::write(
+        &path,
+        entries
+            .iter()
+            .map(|entry| format!("{entry}\n"))
+            .collect::<String>(),
+    )
+    .unwrap();
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_wat"))
+        .arg("replay")
+        .arg(path)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert_eq!(
+        output.stderr,
+        b"Checking switch inhibitors... done\ntrailing error\n"
+    );
+    assert_eq!(output.stdout, b"other host\ntrailing output\n");
+}

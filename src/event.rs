@@ -32,6 +32,7 @@ pub enum Event {
     Backend(BackendEvent),
     Log(LogEvent),
     Artifact(ArtifactEvent),
+    Output { stderr: bool, bytes: Vec<u8> },
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]

@@ -1,7 +1,7 @@
 //! Versioned JSONL input capture. Raw Lix input is replayed through the current adapter.
 use crate::{
     backend::lix_parser::LixEventAdapter,
-    event::{EventBus, EventEnvelope, EventScope},
+    event::{Event, EventBus, EventEnvelope, EventScope, EventSender},
     reporter::{IndicatifReporter, Reporter},
 };
 use anyhow::{Context, Result, bail};
@@ -107,6 +107,7 @@ pub async fn replay(path: &Path) -> Result<()> {
     let result = async {
         let mut adapters = std::collections::HashMap::new();
         let mut previous = 0;
+        let mut output = std::collections::HashMap::<(u64, bool), Vec<u8>>::new();
         for line in lines {
             let value: Value = serde_json::from_str(&line?)?;
             let elapsed = value["elapsed_us"]
@@ -154,10 +155,18 @@ pub async fn replay(path: &Path) -> Result<()> {
                         || (value["lix"] == true && value["stream"] == "stdout")
                     {
                         // Captured for inspection, but not displayed by the live run.
-                    } else if value["stream"] == "stdout" {
-                        std::io::stdout().write_all(&bytes)?;
                     } else {
-                        std::io::stderr().write_all(&bytes)?;
+                        let id = value["command"].as_u64().context("missing command id")?;
+                        let stderr = value["stream"] != "stdout";
+                        let pending = output.entry((id, stderr)).or_default();
+                        pending.extend_from_slice(&bytes);
+                        while let Some(end) = pending.iter().position(|byte| *byte == b'\n') {
+                            let bytes = pending.drain(..=end).collect();
+                            bus.sender()
+                                .unrecorded()
+                                .send(Event::Output { stderr, bytes })
+                                .await?;
+                        }
                     }
                 }
                 Some("outcome") => {
@@ -167,6 +176,16 @@ pub async fn replay(path: &Path) -> Result<()> {
                 }
                 Some("exit") => {
                     if let Some(id) = value["command"].as_u64() {
+                        for stderr in [false, true] {
+                            if let Some(bytes) = output.remove(&(id, stderr)) {
+                                if !bytes.is_empty() {
+                                    bus.sender()
+                                        .unrecorded()
+                                        .send(Event::Output { stderr, bytes })
+                                        .await?;
+                                }
+                            }
+                        }
                         if let Some(mut adapter) = adapters.remove(&id) {
                             adapter.finish(value["success"] == true);
                         }
@@ -174,6 +193,14 @@ pub async fn replay(path: &Path) -> Result<()> {
                 }
                 Some("command") => {}
                 _ => bail!("unknown recording entry"),
+            }
+        }
+        for ((_, stderr), bytes) in output {
+            if !bytes.is_empty() {
+                bus.sender()
+                    .unrecorded()
+                    .send(Event::Output { stderr, bytes })
+                    .await?;
             }
         }
         Ok(())
@@ -186,19 +213,21 @@ pub async fn replay(path: &Path) -> Result<()> {
 
 pub async fn execute_visible(
     command: &mut tokio::process::Command,
+    events: &EventSender,
 ) -> Result<std::process::ExitStatus> {
-    use tokio::io::AsyncReadExt;
+    use tokio::io::{AsyncBufReadExt, BufReader};
     command
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
     let id = start(command);
     let mut child = command.spawn().context("failed to start command")?;
-    let mut stdout = child.stdout.take().context("missing stdout")?;
-    let mut stderr = child.stderr.take().context("missing stderr")?;
+    let mut stdout = BufReader::new(child.stdout.take().context("missing stdout")?);
+    let mut stderr = BufReader::new(child.stderr.take().context("missing stderr")?);
     let out = async {
-        let mut buffer = [0; 8192];
+        let mut buffer = Vec::new();
         loop {
-            let count = stdout.read(&mut buffer).await?;
+            buffer.clear();
+            let count = stdout.read_until(b'\n', &mut buffer).await?;
             if count == 0 {
                 break;
             }
@@ -209,14 +238,21 @@ pub async fn execute_visible(
                 &buffer[..count],
                 false,
             );
-            std::io::stdout().write_all(&buffer[..count])?;
+            events
+                .unrecorded()
+                .send(Event::Output {
+                    stderr: false,
+                    bytes: buffer.clone(),
+                })
+                .await?;
         }
-        Ok::<_, std::io::Error>(())
+        Ok::<_, anyhow::Error>(())
     };
     let err = async {
-        let mut buffer = [0; 8192];
+        let mut buffer = Vec::new();
         loop {
-            let count = stderr.read(&mut buffer).await?;
+            buffer.clear();
+            let count = stderr.read_until(b'\n', &mut buffer).await?;
             if count == 0 {
                 break;
             }
@@ -227,9 +263,15 @@ pub async fn execute_visible(
                 &buffer[..count],
                 false,
             );
-            std::io::stderr().write_all(&buffer[..count])?;
+            events
+                .unrecorded()
+                .send(Event::Output {
+                    stderr: true,
+                    bytes: buffer.clone(),
+                })
+                .await?;
         }
-        Ok::<_, std::io::Error>(())
+        Ok::<_, anyhow::Error>(())
     };
     let (out, err, status) = tokio::join!(out, err, child.wait());
     let status = status?;
@@ -270,7 +312,23 @@ mod tests {
             "-c",
             "printf 'activation output'; printf 'activation error' >&2; exit 9",
         ]);
-        assert_eq!(execute_visible(&mut command).await.unwrap().code(), Some(9));
+        let (bus, mut output) = EventBus::new(16);
+        assert_eq!(
+            execute_visible(&mut command, &bus.sender())
+                .await
+                .unwrap()
+                .code(),
+            Some(9)
+        );
+        drop(bus);
+        let mut displayed = Vec::new();
+        while let Some(envelope) = output.recv().await {
+            if let Event::Output { stderr, bytes } = envelope.event {
+                displayed.push((stderr, bytes));
+            }
+        }
+        assert!(displayed.contains(&(false, b"activation output".to_vec())));
+        assert!(displayed.contains(&(true, b"activation error".to_vec())));
         let entries: Vec<Value> = std::fs::read_to_string(path)
             .unwrap()
             .lines()

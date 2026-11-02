@@ -323,7 +323,7 @@ async fn deploy_host(
 
     let result = async {
         if connection == crate::config::Connection::Sudo {
-            deploy_local(&store_path, activation).await?;
+            deploy_local(&store_path, activation, &events).await?;
         } else {
             deploy_remote(
                 backend.clone(),
@@ -411,7 +411,11 @@ async fn resolve_store_path(link: &Path) -> Result<PathBuf> {
         .with_context(|| format!("failed to resolve store path for {}", link.display()))
 }
 
-async fn deploy_local(store_path: &Path, plan: planner::ActivationPlan) -> Result<()> {
+async fn deploy_local(
+    store_path: &Path,
+    plan: planner::ActivationPlan,
+    events: &EventSender,
+) -> Result<()> {
     let store_path_str = store_path
         .to_str()
         .context("store path contains invalid UTF-8")?;
@@ -426,6 +430,7 @@ async fn deploy_local(store_path: &Path, plan: planner::ActivationPlan) -> Resul
                 "--set",
                 store_path_str,
             ],
+            events,
         )
         .await
         .context("failed to set system profile")?;
@@ -435,16 +440,16 @@ async fn deploy_local(store_path: &Path, plan: planner::ActivationPlan) -> Resul
     let switch_to_config = switch_to_config
         .to_str()
         .context("switch-to-configuration path contains invalid UTF-8")?;
-    run_command_status("sudo", &[switch_to_config, plan.command])
+    run_command_status("sudo", &[switch_to_config, plan.command], events)
         .await
         .with_context(|| format!("failed to run switch-to-configuration {}", plan.command))?;
 
-    run_command_status("sync", &[])
+    run_command_status("sync", &[], events)
         .await
         .context("failed to sync filesystem")?;
 
     if plan.reboot {
-        run_command_status("sudo", &["systemctl", "reboot"])
+        run_command_status("sudo", &["systemctl", "reboot"], events)
             .await
             .context("failed to reboot host")?;
     }
@@ -461,7 +466,7 @@ async fn deploy_remote(
 ) -> Result<()> {
     let remote_store = format!("ssh://root@{hostname}");
     backend
-        .copy_closure(store_path, remote_store.as_str(), true, events)
+        .copy_closure(store_path, remote_store.as_str(), true, events.clone())
         .await
         .with_context(|| format!("failed to copy store path to {hostname}"))?;
 
@@ -472,7 +477,7 @@ async fn deploy_remote(
             "nix-env --profile /nix/var/nix/profiles/system --set {}",
             store_path.display()
         );
-        run_command_status("ssh", &[remote_host.as_str(), remote_cmd.as_str()])
+        run_command_status("ssh", &[remote_host.as_str(), remote_cmd.as_str()], &events)
             .await
             .with_context(|| format!("failed to set remote profile on {hostname}"))?;
     }
@@ -482,12 +487,16 @@ async fn deploy_remote(
         store_path.display(),
         plan.command
     );
-    run_command_status("ssh", &[remote_host.as_str(), remote_switch_cmd.as_str()])
-        .await
-        .with_context(|| format!("failed to switch configuration remotely on {hostname}"))?;
+    run_command_status(
+        "ssh",
+        &[remote_host.as_str(), remote_switch_cmd.as_str()],
+        &events,
+    )
+    .await
+    .with_context(|| format!("failed to switch configuration remotely on {hostname}"))?;
 
     if plan.reboot {
-        run_command_status("ssh", &[remote_host.as_str(), "systemctl reboot"])
+        run_command_status("ssh", &[remote_host.as_str(), "systemctl reboot"], &events)
             .await
             .with_context(|| format!("failed to reboot remote host {hostname}"))?;
     }
@@ -495,10 +504,10 @@ async fn deploy_remote(
     Ok(())
 }
 
-async fn run_command_status(program: &str, args: &[&str]) -> Result<()> {
+async fn run_command_status(program: &str, args: &[&str], events: &EventSender) -> Result<()> {
     let mut command = Command::new(program);
     command.args(args);
-    let status = crate::recording::execute_visible(&mut command).await?;
+    let status = crate::recording::execute_visible(&mut command, events).await?;
 
     if status.success() {
         Ok(())

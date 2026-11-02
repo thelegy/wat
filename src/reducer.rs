@@ -126,7 +126,7 @@ impl PipelineReducer {
             crate::event::Event::Host(event) => self.apply_host(event),
             crate::event::Event::Backend(event) => self.apply_backend(&envelope.scope.host, event),
             crate::event::Event::Log(_) => {}
-            crate::event::Event::Artifact(_) => {}
+            crate::event::Event::Artifact(_) | crate::event::Event::Output { .. } => {}
         }
     }
 

@@ -10,7 +10,7 @@
   perSystem = lib.mkIf (inputs ? treefmt-nix) {
     treefmt = {
       flakeCheck = false; # Already done by pre-commit
-      projectRootFile = ".git/config";
+      projectRootFile = null;
       programs.nixfmt.enable = true;
       settings.excludes = [
         "vendor/**"

@@ -1,4 +1,7 @@
-use std::{collections::HashMap, io::Write};
+use std::{
+    collections::HashMap,
+    io::{IsTerminal, Write},
+};
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -7,7 +10,7 @@ use log::Level;
 
 use crate::{
     event::{ArtifactEvent, Event, EventStream, HostEvent, PipelineEvent},
-    reducer::{ActivitySnapshot, HostSnapshot, PipelineReducer, PipelineSnapshot},
+    reducer::{ActivitySnapshot, MachineColumn, PipelineReducer, PipelineSnapshot},
 };
 
 #[async_trait]
@@ -19,9 +22,11 @@ pub struct IndicatifReporter {
     reducer: PipelineReducer,
     progress: MultiProgress,
     summary_bar: ProgressBar,
-    host_bars: HashMap<String, ProgressBar>,
+    machine_bar: ProgressBar,
     activity_bars: HashMap<u64, ProgressBar>,
     last_summary: String,
+    last_machines: Vec<MachineColumn>,
+    last_machine_line: String,
 }
 
 impl IndicatifReporter {
@@ -29,26 +34,60 @@ impl IndicatifReporter {
         let progress = MultiProgress::new();
         let summary_bar = progress.add(ProgressBar::new_spinner());
         summary_bar.set_style(summary_style());
-        summary_bar.enable_steady_tick(std::time::Duration::from_millis(120));
+        let machine_bar = progress.add(ProgressBar::new_spinner());
+        machine_bar.set_style(summary_style());
 
         Self {
             reducer: PipelineReducer::new(),
             progress,
             summary_bar,
-            host_bars: HashMap::new(),
+            machine_bar,
             activity_bars: HashMap::new(),
             last_summary: String::new(),
+            last_machines: Vec::new(),
+            last_machine_line: String::new(),
         }
     }
 
     fn render(&mut self, snapshot: PipelineSnapshot) {
         self.render_summary(&snapshot.summary);
-        self.render_hosts(&snapshot.hosts);
+        self.render_machines(&snapshot.machines);
         self.render_activities(&snapshot.activities);
+    }
 
-        if snapshot.finished {
-            self.summary_bar.finish_and_clear();
+    fn render_machines(&mut self, columns: &[MachineColumn]) {
+        if self.last_machines == columns {
+            return;
         }
+        let display = machine_display(columns);
+        self.machine_bar.set_style(display.style);
+        self.machine_bar.set_message(display.labels);
+        self.last_machine_line = display.plain;
+        self.last_machines = columns.to_vec();
+    }
+
+    fn finish(&mut self, output: &mut impl Write) -> Result<()> {
+        for (_, bar) in self.activity_bars.drain() {
+            bar.finish_and_clear();
+        }
+        self.summary_bar.finish_and_clear();
+        let snapshot = self.reducer.snapshot();
+        if snapshot.machines.iter().any(|column| column.count > 0) {
+            self.render_machines(&snapshot.machines);
+            if self.progress.is_hidden() {
+                writeln!(output, "{}", self.last_machine_line)?;
+            }
+            self.machine_bar.finish();
+            // indicatif leaves the cursor at the right margin without a newline.
+            // End the command's output explicitly before the shell renders its prompt.
+            if !self.progress.is_hidden() {
+                writeln!(output)?;
+                output.flush()?;
+            }
+        } else {
+            self.machine_bar.finish_and_clear();
+        }
+        Ok(())
     }
 
     fn render_summary(&mut self, summary: &str) {
@@ -56,59 +95,22 @@ impl IndicatifReporter {
             self.summary_bar.set_message(summary.to_string());
             self.last_summary = summary.to_string();
         }
-        self.summary_bar.tick();
-    }
-
-    fn render_hosts(&mut self, hosts: &[HostSnapshot]) {
-        let mut seen = HashMap::new();
-
-        for host in hosts {
-            seen.insert(host.host.clone(), ());
-            let bar = self.host_bars.entry(host.host.clone()).or_insert_with(|| {
-                let bar = self.progress.add(ProgressBar::new_spinner());
-                bar.set_style(host_style());
-                bar.enable_steady_tick(std::time::Duration::from_millis(120));
-                bar
-            });
-
-            let mut message = host.message.clone();
-            if let Some(phase) = host.phase
-                && message.is_empty()
-            {
-                message = format_phase(phase, &host.host);
-            }
-            bar.set_message(message);
-
-            if host.finished {
-                if host.success.unwrap_or(false) {
-                    bar.finish_and_clear();
-                } else {
-                    bar.abandon_with_message(format!("{} failed", host.host));
-                }
-            }
-        }
-
-        let stale_hosts: Vec<String> = self
-            .host_bars
-            .keys()
-            .filter(|host| !seen.contains_key(*host))
-            .cloned()
-            .collect();
-
-        for host in stale_hosts {
-            if let Some(bar) = self.host_bars.remove(&host) {
-                self.progress.remove(&bar);
-            }
-        }
     }
 
     fn render_activities(&mut self, activities: &[ActivitySnapshot]) {
         let mut seen = HashMap::new();
 
-        for activity in activities.iter().filter(|activity| activity.visible) {
+        let mut visible: Vec<_> = activities
+            .iter()
+            .filter(|activity| activity.visible)
+            .collect();
+        visible.sort_by_key(|activity| activity.id);
+        for activity in visible {
             seen.insert(activity.id, ());
             let bar = self.activity_bars.entry(activity.id).or_insert_with(|| {
-                let bar = self.progress.add(ProgressBar::new_spinner());
+                let bar = self
+                    .progress
+                    .insert_before(&self.summary_bar, ProgressBar::new_spinner());
                 bar.set_style(activity_style());
                 bar.enable_steady_tick(std::time::Duration::from_millis(120));
                 bar
@@ -140,7 +142,7 @@ impl IndicatifReporter {
     }
 
     fn log(&self, level: Level, message: &str) {
-        self.summary_bar.suspend(|| match level {
+        self.progress.suspend(|| match level {
             Level::Error => log::error!("{message}"),
             Level::Warn => log::warn!("{message}"),
             Level::Info => log::info!("{message}"),
@@ -150,7 +152,7 @@ impl IndicatifReporter {
     }
 
     fn emit_artifact(&self, artifact: &ArtifactEvent) {
-        self.summary_bar.suspend(|| match artifact {
+        self.progress.suspend(|| match artifact {
             ArtifactEvent::Ready { host, path } => {
                 let _ = host;
                 println!("{}", path.display());
@@ -162,7 +164,15 @@ impl IndicatifReporter {
 #[async_trait]
 impl Reporter for IndicatifReporter {
     async fn run(&mut self, mut events: EventStream) -> Result<()> {
-        while let Some(envelope) = events.recv().await {
+        let mut refresh = tokio::time::interval(std::time::Duration::from_millis(100));
+        loop {
+            let envelope = tokio::select! {
+                envelope = events.recv() => match envelope { Some(envelope) => envelope, None => break },
+                _ = refresh.tick() => {
+                    self.render(self.reducer.snapshot());
+                    continue;
+                }
+            };
             self.reducer.apply(&envelope);
 
             match &envelope.event {
@@ -191,31 +201,17 @@ impl Reporter for IndicatifReporter {
             self.render(snapshot);
         }
 
-        Ok(())
+        self.finish(&mut std::io::stderr())
     }
 }
 
 fn summary_style() -> ProgressStyle {
-    ProgressStyle::with_template("{spinner:.cyan} {msg}")
-        .unwrap_or_else(|_| ProgressStyle::default_spinner())
-}
-
-fn host_style() -> ProgressStyle {
-    ProgressStyle::with_template("{spinner:.green} {msg}")
-        .unwrap_or_else(|_| ProgressStyle::default_spinner())
+    ProgressStyle::with_template("{msg}").unwrap_or_else(|_| ProgressStyle::default_spinner())
 }
 
 fn activity_style() -> ProgressStyle {
     ProgressStyle::with_template("{spinner:.yellow} {msg}")
         .unwrap_or_else(|_| ProgressStyle::default_spinner())
-}
-
-fn format_phase(phase: crate::event::PipelinePhase, host: &str) -> String {
-    match phase {
-        crate::event::PipelinePhase::Evaluate => format!("evaluating {host}"),
-        crate::event::PipelinePhase::Build => format!("building {host}"),
-        crate::event::PipelinePhase::Deploy => format!("deploying {host}"),
-    }
 }
 
 fn activity_message(activity: &ActivitySnapshot) -> String {
@@ -267,4 +263,203 @@ fn activity_message(activity: &ActivitySnapshot) -> String {
     }
 
     message
+}
+
+struct MachineDisplay {
+    style: ProgressStyle,
+    labels: String,
+    plain: String,
+}
+
+fn machine_display(columns: &[MachineColumn]) -> MachineDisplay {
+    let keys = ["m0", "m1", "m2", "m3", "m4", "m5"];
+    let template = columns
+        .iter()
+        .zip(keys)
+        .map(|(column, key)| {
+            let color = if column.count == 0 {
+                "dim".to_string()
+            } else {
+                column.color.to_string()
+            };
+            format!("{{{key}:.{color}}}")
+        })
+        .collect::<Vec<_>>()
+        .join(" / ")
+        + "  {wide_msg:.dim}";
+    let mut style = ProgressStyle::with_template(&template).expect("valid machine status template");
+    for (column, key) in columns.iter().zip(keys) {
+        let count = column.count;
+        style = style.with_key(
+            key,
+            move |_: &indicatif::ProgressState, writer: &mut dyn std::fmt::Write| {
+                let _ = write!(writer, "{count}");
+            },
+        );
+    }
+    let plain_labels = format!(
+        "# {}",
+        columns
+            .iter()
+            .map(|column| column.label)
+            .collect::<Vec<_>>()
+            .join("/")
+    );
+    // Carry label colors inside wide_msg so indicatif still truncates the legend.
+    // Both labels and counts use the palette stored on MachineColumn.
+    let colors = std::io::stderr().is_terminal()
+        && std::env::var_os("NO_COLOR").is_none()
+        && std::env::var("TERM").as_deref() != Ok("dumb");
+    let labels = if colors {
+        let colored = columns
+            .iter()
+            .map(|column| format!("\x1b[38;5;{}m{}\x1b[39m", column.color, column.label))
+            .collect::<Vec<_>>()
+            .join("/");
+        format!("\x1b[2m# {colored}\x1b[0m")
+    } else {
+        plain_labels.clone()
+    };
+    let counts = columns
+        .iter()
+        .map(|column| column.count.to_string())
+        .collect::<Vec<_>>()
+        .join(" / ");
+    let plain = format!("{counts}  {plain_labels}");
+    MachineDisplay {
+        style,
+        labels,
+        plain,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::event::{EventEnvelope, PipelinePhase};
+    use indicatif::{ProgressDrawTarget, TermLike};
+    use std::{
+        io,
+        sync::{Arc, Mutex},
+    };
+
+    #[derive(Clone, Debug)]
+    struct RecordingTerminal {
+        width: u16,
+        bytes: Arc<Mutex<Vec<u8>>>,
+    }
+
+    impl Write for RecordingTerminal {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.bytes.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl TermLike for RecordingTerminal {
+        fn width(&self) -> u16 {
+            self.width
+        }
+        fn height(&self) -> u16 {
+            47
+        }
+        fn move_cursor_up(&self, n: usize) -> io::Result<()> {
+            if n == 0 {
+                return Ok(());
+            }
+            self.write_str(&format!("\x1b[{n}A"))
+        }
+        fn move_cursor_down(&self, n: usize) -> io::Result<()> {
+            if n == 0 {
+                return Ok(());
+            }
+            self.write_str(&format!("\x1b[{n}B"))
+        }
+        fn move_cursor_right(&self, n: usize) -> io::Result<()> {
+            if n == 0 {
+                return Ok(());
+            }
+            self.write_str(&format!("\x1b[{n}C"))
+        }
+        fn move_cursor_left(&self, n: usize) -> io::Result<()> {
+            if n == 0 {
+                return Ok(());
+            }
+            self.write_str(&format!("\x1b[{n}D"))
+        }
+        fn write_line(&self, text: &str) -> io::Result<()> {
+            self.write_str(&format!("{text}\n"))
+        }
+        fn write_str(&self, text: &str) -> io::Result<()> {
+            self.bytes
+                .lock()
+                .unwrap()
+                .extend_from_slice(text.as_bytes());
+            Ok(())
+        }
+        fn clear_line(&self) -> io::Result<()> {
+            self.write_str("\r\x1b[2K")
+        }
+        fn flush(&self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn terminal_completion_ends_with_a_newline_for_every_outcome() {
+        for width in [80, 175] {
+            for outcome in [Some(true), Some(false), None] {
+                let terminal = RecordingTerminal {
+                    width,
+                    bytes: Arc::default(),
+                };
+                let mut reporter = IndicatifReporter::new();
+                reporter
+                    .progress
+                    .set_draw_target(ProgressDrawTarget::term_like(Box::new(terminal.clone())));
+                assert!(!reporter.progress.is_hidden());
+                let mut events = vec![
+                    Event::Pipeline(PipelineEvent::Planned {
+                        stages: vec![("example".into(), vec![PipelinePhase::Build])],
+                    }),
+                    Event::Host(HostEvent::Finished {
+                        host: "example".into(),
+                        phase: PipelinePhase::Build,
+                        success: outcome != Some(false),
+                    }),
+                ];
+                if let Some(success) = outcome {
+                    events.push(Event::Pipeline(PipelineEvent::Finished { success }));
+                }
+                for event in events {
+                    reporter.reducer.apply(&EventEnvelope {
+                        scope: Default::default(),
+                        event,
+                    });
+                }
+                reporter.render(reporter.reducer.snapshot());
+                let running_line = reporter.last_machine_line.clone();
+                let running_labels = reporter.machine_bar.message();
+                reporter.finish(&mut terminal.clone()).unwrap();
+                assert_eq!(reporter.last_machine_line, running_line);
+                assert_eq!(reporter.machine_bar.message(), running_labels);
+                assert!(reporter.machine_bar.prefix().is_empty());
+                drop(reporter);
+                let bytes = terminal.bytes.lock().unwrap();
+                let text = String::from_utf8_lossy(&bytes);
+                assert!(
+                    text.contains("failed") && text.contains("build") && text.contains("done"),
+                    "missing final status at width {width}"
+                );
+                assert!(!text.contains('✓') && !text.contains('✗') && !text.contains('■'));
+                assert!(
+                    bytes.ends_with(b"\n"),
+                    "terminal output lacks a final newline at width {width}: {text:?}"
+                );
+            }
+        }
+    }
 }

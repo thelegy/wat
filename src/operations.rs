@@ -53,6 +53,22 @@ async fn run_pipeline(
         .iter()
         .map(|host| host.hostname.clone())
         .collect();
+    let stages = hostnames
+        .iter()
+        .map(|host| {
+            let mut phases = vec![PipelinePhase::Evaluate, PipelinePhase::Build];
+            if matches!(plan.mode, PlanMode::Deploy(_)) {
+                if config.connection_for(host) != crate::config::Connection::Sudo {
+                    phases.push(PipelinePhase::Upload);
+                }
+                phases.push(PipelinePhase::Deploy);
+            }
+            (host.clone(), phases)
+        })
+        .collect();
+    events
+        .send(Event::Pipeline(PipelineEvent::Planned { stages }))
+        .await?;
     events
         .send(Event::Pipeline(PipelineEvent::Started { hosts: hostnames }))
         .await?;
@@ -440,18 +456,26 @@ async fn deploy_local(
     let switch_to_config = switch_to_config
         .to_str()
         .context("switch-to-configuration path contains invalid UTF-8")?;
-    run_command_status("sudo", &[switch_to_config, plan.command], events)
-        .await
-        .with_context(|| format!("failed to run switch-to-configuration {}", plan.command))?;
+    deployment_stage(
+        events,
+        PipelinePhase::Activate,
+        run_command_status("sudo", &[switch_to_config, plan.command], events),
+    )
+    .await
+    .with_context(|| format!("failed to run switch-to-configuration {}", plan.command))?;
 
     run_command_status("sync", &[], events)
         .await
         .context("failed to sync filesystem")?;
 
     if plan.reboot {
-        run_command_status("sudo", &["systemctl", "reboot"], events)
-            .await
-            .context("failed to reboot host")?;
+        deployment_stage(
+            events,
+            PipelinePhase::Reboot,
+            run_command_status("sudo", &["systemctl", "reboot"], events),
+        )
+        .await
+        .context("failed to reboot host")?;
     }
 
     Ok(())
@@ -465,10 +489,13 @@ async fn deploy_remote(
     events: EventSender,
 ) -> Result<()> {
     let remote_store = format!("ssh://root@{hostname}");
-    backend
-        .copy_closure(store_path, remote_store.as_str(), true, events.clone())
-        .await
-        .with_context(|| format!("failed to copy store path to {hostname}"))?;
+    deployment_stage(
+        &events,
+        PipelinePhase::Upload,
+        backend.copy_closure(store_path, remote_store.as_str(), true, events.clone()),
+    )
+    .await
+    .with_context(|| format!("failed to copy store path to {hostname}"))?;
 
     let remote_host = format!("root@{hostname}");
 
@@ -487,18 +514,26 @@ async fn deploy_remote(
         store_path.display(),
         plan.command
     );
-    run_command_status(
-        "ssh",
-        &[remote_host.as_str(), remote_switch_cmd.as_str()],
+    deployment_stage(
         &events,
+        PipelinePhase::Activate,
+        run_command_status(
+            "ssh",
+            &[remote_host.as_str(), remote_switch_cmd.as_str()],
+            &events,
+        ),
     )
     .await
     .with_context(|| format!("failed to switch configuration remotely on {hostname}"))?;
 
     if plan.reboot {
-        run_command_status("ssh", &[remote_host.as_str(), "systemctl reboot"], &events)
-            .await
-            .with_context(|| format!("failed to reboot remote host {hostname}"))?;
+        deployment_stage(
+            &events,
+            PipelinePhase::Reboot,
+            run_command_status("ssh", &[remote_host.as_str(), "systemctl reboot"], &events),
+        )
+        .await
+        .with_context(|| format!("failed to reboot remote host {hostname}"))?;
     }
 
     Ok(())
@@ -514,4 +549,31 @@ async fn run_command_status(program: &str, args: &[&str], events: &EventSender) 
     } else {
         bail!("{program} exited with status {status}")
     }
+}
+
+async fn deployment_stage(
+    events: &EventSender,
+    phase: PipelinePhase,
+    operation: impl std::future::Future<Output = Result<()>>,
+) -> Result<()> {
+    let host = events
+        .scope()
+        .host
+        .clone()
+        .context("deployment requires a host")?;
+    events
+        .send(Event::Host(HostEvent::Started {
+            host: host.clone(),
+            phase,
+        }))
+        .await?;
+    let result = operation.await;
+    events
+        .send(Event::Host(HostEvent::Finished {
+            host,
+            phase,
+            success: result.is_ok(),
+        }))
+        .await?;
+    result
 }

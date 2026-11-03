@@ -107,3 +107,38 @@ fn replay_joins_output_chunks_and_finishes_partial_lines() {
     );
     assert_eq!(output.stdout, b"other host\ntrailing output\n");
 }
+
+#[test]
+fn replay_keeps_final_machine_outcome_in_redirected_output() {
+    use serde_json::json;
+    for success in [true, false] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("final.jsonl");
+        let events = [
+            json!({"Pipeline": {"Planned": {"stages": [["example", ["Evaluate", "Build"]]]}}}),
+            json!({"Host": {"Finished": {"host": "example", "phase": "Build", "success": success}}}),
+            json!({"Pipeline": {"Finished": {"success": success}}}),
+        ];
+        let mut recording = String::from("{\"version\":1}\n");
+        for event in events {
+            recording.push_str(&format!(
+                "{}\n",
+                json!({"kind": "event", "elapsed_us": 0, "envelope": {"scope": {}, "event": event}})
+            ));
+        }
+        std::fs::write(&path, recording).unwrap();
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_wat"))
+            .arg("replay")
+            .arg(path)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        let expected = if success {
+            "0 / 0 / 0 / 1  # failed/eval/build/done"
+        } else {
+            "1 / 0 / 0 / 0  # failed/eval/build/done"
+        };
+        assert!(stderr.ends_with(&format!("{expected}\n")), "{stderr}");
+    }
+}

@@ -37,10 +37,20 @@ pub enum Event {
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub enum PipelineEvent {
-    Started { hosts: Vec<String> },
+    Planned {
+        stages: Vec<(String, Vec<PipelinePhase>)>,
+    },
+    Started {
+        hosts: Vec<String>,
+    },
     PhaseStarted(PipelinePhase),
-    PhaseFinished { phase: PipelinePhase, success: bool },
-    Finished { success: bool },
+    PhaseFinished {
+        phase: PipelinePhase,
+        success: bool,
+    },
+    Finished {
+        success: bool,
+    },
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -48,6 +58,9 @@ pub enum PipelinePhase {
     Evaluate,
     Build,
     Deploy,
+    Upload,
+    Activate,
+    Reboot,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]

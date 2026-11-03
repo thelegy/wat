@@ -28,18 +28,15 @@ const MIB: f64 = 1024.0 * 1024.0;
 #[derive(Debug, Clone, Default)]
 pub struct PipelineSnapshot {
     pub summary: String,
-    pub hosts: Vec<HostSnapshot>,
+    pub machines: Vec<MachineColumn>,
     pub activities: Vec<ActivitySnapshot>,
-    pub finished: bool,
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct HostSnapshot {
-    pub host: String,
-    pub message: String,
-    pub phase: Option<PipelinePhase>,
-    pub finished: bool,
-    pub success: Option<bool>,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MachineColumn {
+    pub label: &'static str,
+    pub color: u8,
+    pub count: usize,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -57,6 +54,10 @@ pub struct ActivitySnapshot {
 
 #[derive(Default)]
 struct HostState {
+    stages: Vec<PipelinePhase>,
+    position: usize,
+    completed: HashSet<PipelinePhase>,
+    failed: HashSet<PipelinePhase>,
     message: String,
     phase: Option<PipelinePhase>,
     finished: bool,
@@ -81,6 +82,7 @@ struct ActivityAggregate {
 
 struct ActivityInfo {
     kind: u64,
+    started: std::time::Instant,
     parent: u64,
     text: String,
     last_line: String,
@@ -103,7 +105,6 @@ pub struct PipelineReducer {
     bytes_linked: u64,
     corrupted_paths: u64,
     untrusted_paths: u64,
-    finished: bool,
 }
 
 impl PipelineReducer {
@@ -116,7 +117,6 @@ impl PipelineReducer {
             bytes_linked: 0,
             corrupted_paths: 0,
             untrusted_paths: 0,
-            finished: false,
         }
     }
 
@@ -132,18 +132,8 @@ impl PipelineReducer {
 
     pub fn snapshot(&self) -> PipelineSnapshot {
         PipelineSnapshot {
-            summary: self.status_summary(),
-            hosts: self
-                .hosts
-                .iter()
-                .map(|(host, state)| HostSnapshot {
-                    host: host.clone(),
-                    message: state.message.clone(),
-                    phase: state.phase,
-                    finished: state.finished,
-                    success: state.success,
-                })
-                .collect(),
+            summary: format!("Packages: {}", self.status_summary()),
+            machines: self.machine_summary(),
             activities: self
                 .activities
                 .iter()
@@ -152,19 +142,25 @@ impl PipelineReducer {
                     host: activity.host.clone(),
                     text: activity.text.clone(),
                     last_line: activity.last_line.clone(),
-                    visible: activity.visible,
+                    visible: activity.visible
+                        && activity.kind == ACT_BUILD
+                        && activity.started.elapsed() >= std::time::Duration::from_secs(1),
                     done: activity.done,
                     expected: activity.expected,
                     running: activity.running,
                     failed: activity.failed,
                 })
                 .collect(),
-            finished: self.finished,
         }
     }
 
     fn apply_pipeline(&mut self, event: &PipelineEvent) {
         match event {
+            PipelineEvent::Planned { stages } => {
+                for (host, phases) in stages {
+                    self.hosts.entry(host.clone()).or_default().stages = phases.clone();
+                }
+            }
             PipelineEvent::Started { hosts } => {
                 for host in hosts {
                     self.hosts.entry(host.clone()).or_default();
@@ -176,7 +172,7 @@ impl PipelineReducer {
             PipelineEvent::PhaseFinished { phase, success } => {
                 let _ = (phase, success);
             }
-            PipelineEvent::Finished { success } => self.finished = *success,
+            PipelineEvent::Finished { .. } => {}
         }
     }
 
@@ -184,6 +180,19 @@ impl PipelineReducer {
         match event {
             HostEvent::Started { host, phase } => {
                 let state = self.hosts.entry(host.clone()).or_default();
+                let stage = match phase {
+                    PipelinePhase::Activate | PipelinePhase::Reboot => PipelinePhase::Deploy,
+                    PipelinePhase::Deploy
+                        if state.stages.contains(&PipelinePhase::Upload)
+                            && !state.completed.contains(&PipelinePhase::Upload) =>
+                    {
+                        PipelinePhase::Upload
+                    }
+                    phase => *phase,
+                };
+                if let Some(position) = state.stages.iter().position(|p| *p == stage) {
+                    state.position = position;
+                }
                 state.phase = Some(*phase);
                 state.finished = false;
                 state.success = None;
@@ -195,6 +204,14 @@ impl PipelineReducer {
                 success,
             } => {
                 let state = self.hosts.entry(host.clone()).or_default();
+                if *success {
+                    if let Some(position) = state.stages.iter().position(|p| p == phase) {
+                        state.position = position + 1;
+                    }
+                    state.completed.insert(*phase);
+                } else {
+                    state.failed.insert(*phase);
+                }
                 state.phase = Some(*phase);
                 state.finished = true;
                 state.success = Some(*success);
@@ -249,6 +266,7 @@ impl PipelineReducer {
 
         let mut activity = ActivityInfo {
             kind,
+            started: std::time::Instant::now(),
             parent,
             text: text.to_string(),
             last_line: String::new(),
@@ -432,6 +450,56 @@ impl PipelineReducer {
         false
     }
 
+    fn machine_summary(&self) -> Vec<MachineColumn> {
+        let failed = self
+            .hosts
+            .values()
+            .filter(|host| !host.failed.is_empty())
+            .count();
+        let mut columns = vec![MachineColumn {
+            label: "failed",
+            color: 1, // terminal red
+            count: failed,
+        }];
+        for (phase, label, color) in [
+            (PipelinePhase::Evaluate, "eval", 68),    // blue
+            (PipelinePhase::Build, "build", 75),      // sky blue
+            (PipelinePhase::Upload, "copy", 220),     // golden yellow
+            (PipelinePhase::Deploy, "activate", 214), // amber orange
+        ] {
+            if !self.hosts.values().any(|host| host.stages.contains(&phase)) {
+                continue;
+            }
+            let count = self
+                .hosts
+                .values()
+                .filter(|host| {
+                    host.failed.is_empty() && host.stages.get(host.position) == Some(&phase)
+                })
+                .count();
+            columns.push(MachineColumn {
+                label,
+                color,
+                count,
+            });
+        }
+        let count = self
+            .hosts
+            .values()
+            .filter(|host| {
+                host.failed.is_empty()
+                    && !host.stages.is_empty()
+                    && host.position >= host.stages.len()
+            })
+            .count();
+        columns.push(MachineColumn {
+            label: "done",
+            color: 2, // terminal green
+            count,
+        });
+        columns
+    }
+
     fn status_summary(&self) -> String {
         let mut parts = Vec::new();
 
@@ -613,6 +681,9 @@ fn phase_name(phase: PipelinePhase) -> &'static str {
         PipelinePhase::Evaluate => "evaluating",
         PipelinePhase::Build => "building",
         PipelinePhase::Deploy => "deploying",
+        PipelinePhase::Upload => "uploading",
+        PipelinePhase::Activate => "activating",
+        PipelinePhase::Reboot => "rebooting",
     }
 }
 
@@ -626,4 +697,181 @@ fn store_path_to_name(path: &str) -> String {
     };
 
     name.trim_end_matches(".drv").to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn machine_counts_move_between_planned_stages() {
+        let mut reducer = PipelineReducer::new();
+        reducer.apply_pipeline(&PipelineEvent::Planned {
+            stages: vec![
+                (
+                    "alpha".into(),
+                    vec![
+                        PipelinePhase::Evaluate,
+                        PipelinePhase::Build,
+                        PipelinePhase::Deploy,
+                    ],
+                ),
+                (
+                    "beta".into(),
+                    vec![PipelinePhase::Evaluate, PipelinePhase::Build],
+                ),
+            ],
+        });
+        let counts = |reducer: &PipelineReducer| {
+            reducer
+                .snapshot()
+                .machines
+                .iter()
+                .map(|c| c.count)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(counts(&reducer), vec![0, 2, 0, 0, 0]);
+        for host in ["alpha", "beta"] {
+            reducer.apply_host(&HostEvent::Finished {
+                host: host.into(),
+                phase: PipelinePhase::Evaluate,
+                success: true,
+            });
+        }
+        assert_eq!(counts(&reducer), vec![0, 0, 2, 0, 0]);
+        for host in ["alpha", "beta"] {
+            reducer.apply_host(&HostEvent::Finished {
+                host: host.into(),
+                phase: PipelinePhase::Build,
+                success: true,
+            });
+        }
+        assert_eq!(counts(&reducer), vec![0, 0, 0, 1, 1]);
+        reducer.apply_host(&HostEvent::Finished {
+            host: "alpha".into(),
+            phase: PipelinePhase::Activate,
+            success: true,
+        });
+        assert_eq!(counts(&reducer), vec![0, 0, 0, 1, 1]);
+        reducer.apply_host(&HostEvent::Finished {
+            host: "alpha".into(),
+            phase: PipelinePhase::Deploy,
+            success: true,
+        });
+        assert_eq!(counts(&reducer), vec![0, 0, 0, 0, 2]);
+    }
+
+    #[test]
+    fn upload_and_activation_keep_each_host_in_exactly_one_column() {
+        let mut reducer = PipelineReducer::new();
+        reducer.apply_pipeline(&PipelineEvent::Planned {
+            stages: vec![(
+                "alpha".into(),
+                vec![
+                    PipelinePhase::Evaluate,
+                    PipelinePhase::Build,
+                    PipelinePhase::Upload,
+                    PipelinePhase::Deploy,
+                ],
+            )],
+        });
+        let counts = |r: &PipelineReducer| {
+            r.snapshot()
+                .machines
+                .iter()
+                .map(|c| c.count)
+                .collect::<Vec<_>>()
+        };
+        for phase in [PipelinePhase::Evaluate, PipelinePhase::Build] {
+            reducer.apply_host(&HostEvent::Finished {
+                host: "alpha".into(),
+                phase,
+                success: true,
+            });
+        }
+        reducer.apply_host(&HostEvent::Started {
+            host: "alpha".into(),
+            phase: PipelinePhase::Deploy,
+        });
+        assert_eq!(
+            reducer
+                .snapshot()
+                .machines
+                .iter()
+                .map(|column| column.label)
+                .collect::<Vec<_>>(),
+            vec!["failed", "eval", "build", "copy", "activate", "done"]
+        );
+        assert_eq!(counts(&reducer), vec![0, 0, 0, 1, 0, 0]);
+        reducer.apply_host(&HostEvent::Finished {
+            host: "alpha".into(),
+            phase: PipelinePhase::Upload,
+            success: true,
+        });
+        assert_eq!(counts(&reducer), vec![0, 0, 0, 0, 1, 0]);
+        for phase in [PipelinePhase::Activate, PipelinePhase::Reboot] {
+            reducer.apply_host(&HostEvent::Finished {
+                host: "alpha".into(),
+                phase,
+                success: true,
+            });
+            assert_eq!(counts(&reducer), vec![0, 0, 0, 0, 1, 0]);
+        }
+        reducer.apply_host(&HostEvent::Finished {
+            host: "alpha".into(),
+            phase: PipelinePhase::Deploy,
+            success: true,
+        });
+        assert_eq!(counts(&reducer), vec![0, 0, 0, 0, 0, 1]);
+    }
+
+    #[test]
+    fn failures_leave_stage_columns_and_never_count_as_success() {
+        let mut reducer = PipelineReducer::new();
+        reducer.apply_pipeline(&PipelineEvent::Planned {
+            stages: vec![("alpha".into(), vec![PipelinePhase::Build])],
+        });
+        reducer.apply_host(&HostEvent::Finished {
+            host: "alpha".into(),
+            phase: PipelinePhase::Build,
+            success: false,
+        });
+        let columns = reducer.snapshot().machines;
+        assert_eq!(
+            columns.iter().map(|c| c.count).collect::<Vec<_>>(),
+            vec![1, 0, 0]
+        );
+        assert_eq!(columns[0].label, "failed");
+    }
+
+    #[test]
+    fn only_builds_running_for_a_second_get_detail_rows() {
+        let mut reducer = PipelineReducer::new();
+        for (id, kind) in [(1, ACT_BUILD), (2, ACT_QUERY_PATH_INFO)] {
+            reducer.handle_start(id, kind, 0, 0, "activity", &[], None);
+        }
+        assert!(reducer.snapshot().activities.iter().all(|a| !a.visible));
+        for activity in reducer.activities.values_mut() {
+            activity.started -= std::time::Duration::from_secs(2);
+        }
+        let snapshot = reducer.snapshot();
+        assert!(
+            snapshot
+                .activities
+                .iter()
+                .find(|a| a.id == 1)
+                .unwrap()
+                .visible
+        );
+        assert!(
+            !snapshot
+                .activities
+                .iter()
+                .find(|a| a.id == 2)
+                .unwrap()
+                .visible
+        );
+        reducer.handle_stop(1);
+        assert!(reducer.snapshot().activities.iter().all(|a| !a.visible));
+    }
 }

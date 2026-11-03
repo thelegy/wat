@@ -102,8 +102,56 @@ pub async fn replay(path: &Path) -> Result<()> {
     if header["version"] != 1 {
         bail!("unsupported recording version");
     }
+    let mut stages = std::collections::BTreeMap::<String, Vec<crate::event::PipelinePhase>>::new();
+    let mut planned = None;
+    let mut copies = std::collections::HashMap::new();
+    for line in BufReader::new(File::open(path)?).lines().skip(1) {
+        let value: Value = serde_json::from_str(&line?)?;
+        if let Some((command, host)) = legacy_copy_command(&value) {
+            copies.insert(command, host);
+        }
+        if value["kind"] != "event" {
+            continue;
+        }
+        let envelope: EventEnvelope = serde_json::from_value(value["envelope"].clone())?;
+        match envelope.event {
+            Event::Pipeline(crate::event::PipelineEvent::Planned { stages }) => {
+                planned = Some(stages)
+            }
+            Event::Host(crate::event::HostEvent::Started { host, phase })
+            | Event::Host(crate::event::HostEvent::Finished { host, phase, .. }) => {
+                let phases = stages.entry(host).or_default();
+                if !phases.contains(&phase) {
+                    phases.push(phase);
+                }
+            }
+            _ => {}
+        }
+    }
+    // New recordings provide explicit stages; infer copy boundaries only for legacy input.
+    if planned.is_some() {
+        copies.clear();
+    }
+    for host in copies.values() {
+        if let Some(phases) = stages.get_mut(host) {
+            if !phases.contains(&crate::event::PipelinePhase::Upload) {
+                let position = phases
+                    .iter()
+                    .position(|phase| *phase == crate::event::PipelinePhase::Deploy)
+                    .unwrap_or(phases.len());
+                phases.insert(position, crate::event::PipelinePhase::Upload);
+            }
+        }
+    }
+    let stages = planned.unwrap_or_else(|| stages.into_iter().collect());
     let (bus, events) = EventBus::new(512);
     let reporter = tokio::spawn(async move { IndicatifReporter::new().run(events).await });
+    bus.sender()
+        .unrecorded()
+        .send(Event::Pipeline(crate::event::PipelineEvent::Planned {
+            stages,
+        }))
+        .await?;
     let result = async {
         let mut adapters = std::collections::HashMap::new();
         let mut previous = 0;
@@ -175,6 +223,16 @@ pub async fn replay(path: &Path) -> Result<()> {
                     }
                 }
                 Some("exit") => {
+                    if let Some(host) = value["command"].as_u64().and_then(|id| copies.get(&id)) {
+                        bus.sender()
+                            .unrecorded()
+                            .send(Event::Host(crate::event::HostEvent::Finished {
+                                host: host.clone(),
+                                phase: crate::event::PipelinePhase::Upload,
+                                success: value["success"] == true,
+                            }))
+                            .await?;
+                    }
                     if let Some(id) = value["command"].as_u64() {
                         for stderr in [false, true] {
                             if let Some(bytes) = output.remove(&(id, stderr)) {
@@ -191,7 +249,17 @@ pub async fn replay(path: &Path) -> Result<()> {
                         }
                     }
                 }
-                Some("command") => {}
+                Some("command") => {
+                    if let Some(host) = value["command"].as_u64().and_then(|id| copies.get(&id)) {
+                        bus.sender()
+                            .unrecorded()
+                            .send(Event::Host(crate::event::HostEvent::Started {
+                                host: host.clone(),
+                                phase: crate::event::PipelinePhase::Upload,
+                            }))
+                            .await?;
+                    }
+                }
                 _ => bail!("unknown recording entry"),
             }
         }
@@ -353,4 +421,27 @@ mod tests {
                 .any(|entry| entry["kind"] == "exit" && entry["code"] == 9)
         );
     }
+}
+
+// Restrict inference to the remote deployment copy shape used by wat.
+fn legacy_copy_command(value: &Value) -> Option<(u64, String)> {
+    if value["kind"] != "command" {
+        return None;
+    }
+    let program = Path::new(value["program"].as_str()?)
+        .file_name()?
+        .to_str()?;
+    if !matches!(program, "nix" | "lix") {
+        return None;
+    }
+    let args = value["args"].as_array()?;
+    if !args.iter().any(|arg| arg == "copy") {
+        return None;
+    }
+    let target = args.windows(2).find(|pair| pair[0] == "--to")?[1].as_str()?;
+    let host = target.strip_prefix("ssh://root@")?;
+    if host.is_empty() {
+        return None;
+    }
+    Some((value["command"].as_u64()?, host.to_string()))
 }

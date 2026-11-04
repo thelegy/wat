@@ -25,6 +25,7 @@ pub struct IndicatifReporter {
     machine_bar: ProgressBar,
     activity_bars: HashMap<u64, ProgressBar>,
     last_summary: String,
+    host_width: usize,
     last_machines: Vec<MachineColumn>,
     last_machine_line: String,
 }
@@ -44,6 +45,7 @@ impl IndicatifReporter {
             machine_bar,
             activity_bars: HashMap::new(),
             last_summary: String::new(),
+            host_width: 0,
             last_machines: Vec::new(),
             last_machine_line: String::new(),
         }
@@ -141,13 +143,17 @@ impl IndicatifReporter {
         }
     }
 
-    fn log(&self, level: Level, message: &str) {
-        self.progress.suspend(|| match level {
-            Level::Error => log::error!("{message}"),
-            Level::Warn => log::warn!("{message}"),
-            Level::Info => log::info!("{message}"),
-            Level::Debug => log::debug!("{message}"),
-            Level::Trace => log::trace!("{message}"),
+    fn set_host_width<'a>(&mut self, hosts: impl Iterator<Item = &'a str>) {
+        self.host_width = hosts.map(|host| host.chars().count()).max().unwrap_or(0);
+    }
+
+    fn log(&self, level: Level, host: Option<&str>, message: &str) {
+        let target = match host {
+            Some(host) => format!("{host:>width$}", width = self.host_width),
+            None => module_path!().to_string(),
+        };
+        self.progress.suspend(|| {
+            log::log!(target: &target, level, "{message}");
         });
     }
 
@@ -173,14 +179,23 @@ impl Reporter for IndicatifReporter {
                     continue;
                 }
             };
+            match &envelope.event {
+                Event::Pipeline(PipelineEvent::Planned { stages }) => {
+                    self.set_host_width(stages.iter().map(|(host, _)| host.as_str()));
+                }
+                Event::Pipeline(PipelineEvent::Started { hosts }) => {
+                    self.set_host_width(hosts.iter().map(String::as_str));
+                }
+                _ => {}
+            }
             self.reducer.apply(&envelope);
 
             match &envelope.event {
-                Event::Log(log) => self.log(log.level, &log.message),
+                Event::Log(log) => self.log(log.level, envelope.scope.host.as_deref(), &log.message),
                 Event::Artifact(artifact) => self.emit_artifact(artifact),
                 Event::Output { bytes, .. } => {
                     for line in String::from_utf8_lossy(bytes).lines() {
-                        self.log(Level::Info, line);
+                        self.log(Level::Info, envelope.scope.host.as_deref(), line);
                     }
                 }
                 Event::Pipeline(PipelineEvent::Finished { .. }) => {}

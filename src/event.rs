@@ -135,20 +135,20 @@ impl EventSender {
     }
 
     pub fn with_host(&self, host: impl Into<String>) -> Self {
-        self.with_overlay(EventScope {
+        self.with_scope(EventScope {
             host: Some(host.into()),
             phase: None,
         })
     }
 
     pub fn with_phase(&self, phase: PipelinePhase) -> Self {
-        self.with_overlay(EventScope {
+        self.with_scope(EventScope {
             host: None,
             phase: Some(phase),
         })
     }
 
-    fn with_overlay(&self, overlay: EventScope) -> Self {
+    pub fn with_scope(&self, overlay: EventScope) -> Self {
         Self {
             tx: self.tx.clone(),
             scope: self.scope.merge(overlay),

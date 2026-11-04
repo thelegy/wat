@@ -8,7 +8,7 @@ mod recording;
 mod reducer;
 mod reporter;
 
-use std::{path::Path, sync::Once};
+use std::{io::Write, path::Path, sync::Once};
 
 use anyhow::{Result, bail};
 use clap::Parser;
@@ -40,7 +40,20 @@ pub fn complete() {
 fn init_logging() {
     INIT_LOGGER.call_once(|| {
         let env = env_logger::Env::default().default_filter_or("info");
-        if let Err(err) = env_logger::Builder::from_env(env).try_init() {
+        if let Err(err) = env_logger::Builder::from_env(env)
+            .format(|buffer, record| {
+                let style = buffer.default_level_style(record.level());
+                writeln!(
+                    buffer,
+                    "[{} {style}{:<5}{style:#} {}] {}",
+                    buffer.timestamp(),
+                    record.level(),
+                    record.target(),
+                    record.args()
+                )
+            })
+            .try_init()
+        {
             eprintln!("failed to initialize logger: {err}");
         }
     });

@@ -74,7 +74,13 @@ fn replay_joins_output_chunks_and_finishes_partial_lines() {
     use serde_json::json;
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("output.jsonl");
-    let mut entries = vec![json!({"version": 1})];
+    let mut entries = vec![
+        json!({"version": 1}),
+        json!({"kind": "event", "elapsed_us": 0, "envelope": {
+            "scope": {"host": null, "phase": null},
+            "event": {"Pipeline": {"Started": {"hosts": ["sirrah", "longer-host"]}}}
+        }}),
+    ];
     for (command, stream, bytes) in [
         (1, "stderr", b"Checking switch inhibitors...".as_slice()),
         (2, "stdout", b"other host\n".as_slice()),
@@ -85,6 +91,11 @@ fn replay_joins_output_chunks_and_finishes_partial_lines() {
             json!({"kind": "output", "elapsed_us": 0, "command": command,
             "stream": stream, "bytes": bytes, "lix": false}),
         );
+    }
+    for entry in &mut entries {
+        if entry["command"] == 1 {
+            entry["scope"] = json!({"host": "sirrah", "phase": "Deploy"});
+        }
     }
     entries.push(json!({"kind": "exit", "elapsed_us": 0, "command": 1, "success": true}));
     std::fs::write(
@@ -116,6 +127,8 @@ fn replay_joins_output_chunks_and_finishes_partial_lines() {
         assert!(line.starts_with('['), "missing timestamp: {line}");
         assert!(line.contains("Z INFO "), "missing log prefix: {line}");
         assert!(line.ends_with(expected), "{line}");
+        let target = if expected == "other host" { "wat::reporter" } else { "     sirrah" };
+        assert!(line.contains(&format!(" INFO  {target}]")), "{line}");
     }
 
     let filtered = std::process::Command::new(env!("CARGO_BIN_EXE_wat"))
@@ -127,6 +140,25 @@ fn replay_joins_output_chunks_and_finishes_partial_lines() {
     assert!(filtered.status.success());
     assert!(filtered.stdout.is_empty());
     assert!(filtered.stderr.is_empty());
+
+    // Legacy recordings stored an empty scope for SSH output. Recover the host
+    // from the command while retaining line buffering and hostname padding.
+    for entry in &mut entries {
+        if entry["command"] == 1 && entry["kind"] == "output" {
+            entry["scope"] = json!({"host": null, "phase": null});
+        }
+    }
+    entries.insert(1, json!({"kind": "command", "elapsed_us": 0,
+        "command": 1, "program": "ssh", "args": ["root@sirrah", "activate"]}));
+    std::fs::write(&path, entries.iter().map(|entry| format!("{entry}\n")).collect::<String>()).unwrap();
+    let legacy = std::process::Command::new(env!("CARGO_BIN_EXE_wat"))
+        .arg("replay").arg(&path)
+        .env("RUST_LOG", "info").env("RUST_LOG_STYLE", "never")
+        .output().unwrap();
+    assert!(legacy.status.success());
+    let legacy_stderr = String::from_utf8(legacy.stderr).unwrap();
+    let messages = |text: &str| text.lines().map(|line| line.split_once(" INFO ").unwrap().1.to_string()).collect::<Vec<_>>();
+    assert_eq!(messages(&legacy_stderr), messages(&stderr));
 }
 
 #[test]

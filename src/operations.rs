@@ -22,9 +22,17 @@ use crate::{
     reporter::{IndicatifReporter, Reporter},
 };
 
-pub async fn execute(command: CliCommand) -> Result<()> {
+pub async fn execute(mut command: CliCommand) -> Result<()> {
     let config = crate::config::Config::load(Path::new("."))?;
     let backend = backend::detect();
+    if let Some(args) = command.build_args_mut() {
+        if args.all {
+            args.hostnames = backend.list_machines().await.context("failed to list hosts for --all")?;
+            if args.hostnames.is_empty() {
+                bail!("no hosts found in nixosConfigurations");
+            }
+        }
+    }
     let plan = planner::plan(&command)?;
     let (bus, events) = EventBus::new(512);
 

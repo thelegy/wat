@@ -82,7 +82,7 @@ impl Backend for LixBackend {
             .output()
             .await
             .with_context(|| {
-                format!("failed to invoke {} for hostname completion", self.binary())
+                format!("failed to invoke {} to list hosts", self.binary())
             })?;
 
         if !output.status.success() {

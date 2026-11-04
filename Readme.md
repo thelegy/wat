@@ -1,5 +1,19 @@
 # Wat
 
+## Selecting hosts
+
+Pass one or more hostnames, or use `-A` / `--all` to target every host in the
+current flake's `nixosConfigurations`:
+
+```sh
+wat build my-host other-host
+wat build --all
+wat switch -A
+```
+
+The flag works with all host-targeting commands and cannot be combined with
+explicit hostnames. An empty host list is an error.
+
 ## Shell Completions
 
 Generate completion scripts by setting the `COMPLETE` environment variable when invoking `wat`, then install the output where your shell expects:

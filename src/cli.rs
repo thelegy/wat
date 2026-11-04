@@ -46,8 +46,12 @@ pub enum Command {
 #[derive(Debug, Args)]
 pub struct CommonBuildArgs {
     /// The names of the hosts to operate on
-    #[arg(required = true, num_args = 1.., add = ArgValueCandidates::new(fetch_hostname_candidates))]
+    #[arg(required_unless_present = "all", conflicts_with = "all", num_args = 1.., add = ArgValueCandidates::new(fetch_hostname_candidates))]
     pub hostnames: Vec<String>,
+
+    /// Operate on all hosts in the flake
+    #[arg(short = 'A', long)]
+    pub all: bool,
 }
 
 fn fetch_hostname_candidates() -> Vec<CompletionCandidate> {
@@ -70,4 +74,44 @@ fn fetch_hostnames() -> Result<Vec<String>> {
         .build()
         .map_err(anyhow::Error::from)?
         .block_on(backend.list_machines())
+}
+
+impl Command {
+    pub fn build_args_mut(&mut self) -> Option<&mut CommonBuildArgs> {
+        match self {
+            Self::Replay { .. } => None,
+            Self::Switch(args)
+            | Self::Boot(args)
+            | Self::Reboot(args)
+            | Self::Test(args)
+            | Self::DryActivate(args)
+            | Self::Build(args)
+            | Self::Iso(args)
+            | Self::Sdcard(args) => Some(args),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn host_selection_requires_names_or_all_for_every_command() {
+        for command in ["switch", "boot", "reboot", "test", "dry-activate", "build", "iso", "sdcard"] {
+            assert!(Cli::try_parse_from(["wat", command]).is_err());
+            for flag in ["-A", "--all"] {
+                let mut cli = Cli::try_parse_from(["wat", command, flag]).unwrap();
+                let args = cli.command.build_args_mut().unwrap();
+                assert!(args.all);
+                assert!(args.hostnames.is_empty());
+                assert!(Cli::try_parse_from(["wat", command, flag, "host"]).is_err());
+                assert!(Cli::try_parse_from(["wat", command, "host", flag]).is_err());
+            }
+            let mut cli = Cli::try_parse_from(["wat", command, "one", "two"]).unwrap();
+            let args = cli.command.build_args_mut().unwrap();
+            assert!(!args.all);
+            assert_eq!(args.hostnames, ["one", "two"]);
+        }
+    }
 }

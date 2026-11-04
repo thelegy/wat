@@ -97,15 +97,36 @@ fn replay_joins_output_chunks_and_finishes_partial_lines() {
     .unwrap();
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_wat"))
         .arg("replay")
-        .arg(path)
+        .arg(&path)
+        .env("RUST_LOG", "info")
+        .env("RUST_LOG_STYLE", "never")
         .output()
         .unwrap();
     assert!(output.status.success());
-    assert_eq!(
-        output.stderr,
-        b"Checking switch inhibitors... done\ntrailing error\n"
-    );
-    assert_eq!(output.stdout, b"other host\ntrailing output\n");
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    let lines: Vec<_> = stderr.lines().collect();
+    assert_eq!(lines.len(), 4, "{stderr}");
+    for (line, expected) in lines.iter().zip([
+        "other host",
+        "Checking switch inhibitors... done",
+        "trailing output",
+        "trailing error",
+    ]) {
+        assert!(line.starts_with('['), "missing timestamp: {line}");
+        assert!(line.contains("Z INFO "), "missing log prefix: {line}");
+        assert!(line.ends_with(expected), "{line}");
+    }
+
+    let filtered = std::process::Command::new(env!("CARGO_BIN_EXE_wat"))
+        .arg("replay")
+        .arg(&path)
+        .env("RUST_LOG", "warn")
+        .output()
+        .unwrap();
+    assert!(filtered.status.success());
+    assert!(filtered.stdout.is_empty());
+    assert!(filtered.stderr.is_empty());
 }
 
 #[test]

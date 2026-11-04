@@ -178,19 +178,10 @@ impl Reporter for IndicatifReporter {
             match &envelope.event {
                 Event::Log(log) => self.log(log.level, &log.message),
                 Event::Artifact(artifact) => self.emit_artifact(artifact),
-                Event::Output { stderr, bytes } => {
-                    self.progress.suspend(|| -> std::io::Result<()> {
-                        let mut writer: Box<dyn Write> = if *stderr {
-                            Box::new(std::io::stderr())
-                        } else {
-                            Box::new(std::io::stdout())
-                        };
-                        writer.write_all(bytes)?;
-                        if !bytes.ends_with(b"\n") {
-                            writer.write_all(b"\n")?;
-                        }
-                        writer.flush()
-                    })?;
+                Event::Output { bytes, .. } => {
+                    for line in String::from_utf8_lossy(bytes).lines() {
+                        self.log(Level::Info, line);
+                    }
                 }
                 Event::Pipeline(PipelineEvent::Finished { .. }) => {}
                 Event::Host(HostEvent::Finished { .. }) => {}

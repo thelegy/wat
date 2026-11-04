@@ -52,6 +52,10 @@ pub struct CommonBuildArgs {
     /// Operate on all hosts in the flake
     #[arg(short = 'A', long)]
     pub all: bool,
+
+    /// Stop starting deployments after a host fails; let running operations finish
+    #[arg(long)]
+    pub fail_early: bool,
 }
 
 fn fetch_hostname_candidates() -> Vec<CompletionCandidate> {

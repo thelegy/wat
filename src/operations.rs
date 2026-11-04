@@ -7,7 +7,6 @@ use anyhow::{Context, Result, bail};
 use tempfile::{Builder, TempDir};
 use tokio::{
     process::Command,
-    sync::{OwnedSemaphorePermit, Semaphore},
     task::JoinSet,
 };
 
@@ -100,76 +99,39 @@ async fn run_pipeline(
         }))
         .await?;
 
-    let builds = match build_hosts(backend.clone(), &plan.hosts, events.clone()).await {
-        Ok(builds) => builds,
-        Err(error) => {
-            events
-                .send(Event::Pipeline(PipelineEvent::PhaseFinished {
-                    phase: PipelinePhase::Build,
-                    success: false,
-                }))
-                .await?;
-            events
-                .send(Event::Pipeline(PipelineEvent::Finished { success: false }))
-                .await?;
-            return Err(error);
-        }
-    };
-
+    let (builds, mut errors) = build_hosts(backend.clone(), &plan.hosts, events.clone()).await;
     events
         .send(Event::Pipeline(PipelineEvent::PhaseFinished {
             phase: PipelinePhase::Build,
-            success: true,
+            success: errors.is_empty(),
         }))
         .await?;
 
-    match plan.mode {
-        PlanMode::BuildOnly | PlanMode::Artifact => {
+    if !(plan.fail_early && !errors.is_empty()) && !builds.is_empty() {
+        if let PlanMode::Deploy(activation) = plan.mode {
             events
-                .send(Event::Pipeline(PipelineEvent::Finished { success: true }))
+                .send(Event::Pipeline(PipelineEvent::PhaseStarted(PipelinePhase::Deploy)))
                 .await?;
-            Ok(())
-        }
-        PlanMode::Deploy(activation) => {
+            let deploy_errors = deploy_hosts(
+                backend, &builds, activation, &config, events.clone(), plan.fail_early,
+            ).await;
             events
-                .send(Event::Pipeline(PipelineEvent::PhaseStarted(
-                    PipelinePhase::Deploy,
-                )))
-                .await?;
-            events
-                .send(Event::Log(LogEvent {
-                    level: log::Level::Info,
-                    message: "Deploying selected hosts".to_string(),
+                .send(Event::Pipeline(PipelineEvent::PhaseFinished {
+                    phase: PipelinePhase::Deploy,
+                    success: deploy_errors.is_empty(),
                 }))
                 .await?;
-            let result = deploy_hosts(backend, &builds, activation, &config, events.clone()).await;
-            match result {
-                Ok(()) => {
-                    events
-                        .send(Event::Pipeline(PipelineEvent::PhaseFinished {
-                            phase: PipelinePhase::Deploy,
-                            success: true,
-                        }))
-                        .await?;
-                    events
-                        .send(Event::Pipeline(PipelineEvent::Finished { success: true }))
-                        .await?;
-                    Ok(())
-                }
-                Err(error) => {
-                    events
-                        .send(Event::Pipeline(PipelineEvent::PhaseFinished {
-                            phase: PipelinePhase::Deploy,
-                            success: false,
-                        }))
-                        .await?;
-                    events
-                        .send(Event::Pipeline(PipelineEvent::Finished { success: false }))
-                        .await?;
-                    Err(error)
-                }
-            }
+            errors.extend(deploy_errors);
         }
+    }
+
+    events
+        .send(Event::Pipeline(PipelineEvent::Finished { success: errors.is_empty() }))
+        .await?;
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        bail!("{}", errors.iter().map(|error| format!("{error:#}")).collect::<Vec<_>>().join("\n"))
     }
 }
 
@@ -212,7 +174,7 @@ async fn build_hosts(
     backend: Arc<dyn Backend + Send + Sync>,
     hosts: &[HostPlan],
     events: EventSender,
-) -> Result<Vec<BuildOutcome>> {
+) -> (Vec<BuildOutcome>, Vec<anyhow::Error>) {
     let mut tasks = JoinSet::new();
 
     for host in hosts.iter().cloned() {
@@ -282,7 +244,7 @@ async fn build_host(
     }
     .await;
 
-    if let Err(error) = &result {
+    if result.is_err() {
         let _ = events
             .send(Event::Host(HostEvent::Finished {
                 host: host_name,
@@ -290,7 +252,6 @@ async fn build_host(
                 success: false,
             }))
             .await;
-        return Err(anyhow::anyhow!("{error}"));
     }
 
     result
@@ -302,27 +263,31 @@ async fn deploy_hosts(
     activation: planner::ActivationPlan,
     config: &crate::config::Config,
     events: EventSender,
-) -> Result<()> {
-    let concurrency = deploy_concurrency();
-    let semaphore = Arc::new(Semaphore::new(concurrency));
+    fail_early: bool,
+) -> Vec<anyhow::Error> {
+    let mut pending = builds.iter();
     let mut tasks = JoinSet::new();
-
-    for build in builds.iter() {
-        let permit = semaphore.clone().acquire_owned().await?;
-        let backend = backend.clone();
-        let events = events.clone();
-        let hostname = build.host.clone();
-        let store_path = build.store_path.clone();
-        let connection = config.connection_for(&hostname);
-        tasks.spawn(async move {
-            deploy_host(
-                backend, hostname, store_path, activation, connection, permit, events,
-            )
-            .await
-        });
+    let mut errors = Vec::new();
+    loop {
+        while tasks.len() < deploy_concurrency() && !(fail_early && !errors.is_empty()) {
+            let Some(build) = pending.next() else { break };
+            let backend = backend.clone();
+            let events = events.clone();
+            let hostname = build.host.clone();
+            let store_path = build.store_path.clone();
+            let connection = config.connection_for(&hostname);
+            tasks.spawn(async move {
+                deploy_host(backend, hostname, store_path, activation, connection, events).await
+            });
+        }
+        let Some(result) = tasks.join_next().await else { break };
+        match result {
+            Ok(Ok(())) => {},
+            Ok(Err(error)) => errors.push(error),
+            Err(error) => errors.push(anyhow::anyhow!("task join failed: {error}")),
+        }
     }
-
-    collect_join_set(tasks).await.map(|_| ())
+    errors
 }
 
 async fn deploy_host(
@@ -331,7 +296,6 @@ async fn deploy_host(
     store_path: PathBuf,
     activation: planner::ActivationPlan,
     connection: crate::config::Connection,
-    _permit: OwnedSemaphorePermit,
     events: EventSender,
 ) -> Result<()> {
     let host_name = hostname.clone();
@@ -370,7 +334,7 @@ async fn deploy_host(
     }
     .await;
 
-    if let Err(error) = &result {
+    if result.is_err() {
         let _ = events
             .send(Event::Host(HostEvent::Finished {
                 host: host_name,
@@ -378,7 +342,6 @@ async fn deploy_host(
                 success: false,
             }))
             .await;
-        return Err(anyhow::anyhow!("{error}"));
     }
 
     result
@@ -390,28 +353,17 @@ struct BuildOutcome {
     _temp_dir: TempDir,
 }
 
-async fn collect_join_set<T: 'static>(mut tasks: JoinSet<Result<T>>) -> Result<Vec<T>> {
+async fn collect_join_set<T: 'static>(mut tasks: JoinSet<Result<T>>) -> (Vec<T>, Vec<anyhow::Error>) {
     let mut results = Vec::new();
-    let mut first_error = None;
-
-    while let Some(join_result) = tasks.join_next().await {
-        match join_result {
+    let mut errors = Vec::new();
+    while let Some(result) = tasks.join_next().await {
+        match result {
             Ok(Ok(item)) => results.push(item),
-            Ok(Err(error)) if first_error.is_none() => first_error = Some(error),
-            Ok(Err(_)) => {}
-            Err(error) => {
-                if first_error.is_none() {
-                    first_error = Some(anyhow::anyhow!("task join failed: {error}"));
-                }
-            }
+            Ok(Err(error)) => errors.push(error),
+            Err(error) => errors.push(anyhow::anyhow!("task join failed: {error}")),
         }
     }
-
-    if let Some(error) = first_error {
-        Err(error)
-    } else {
-        Ok(results)
-    }
+    (results, errors)
 }
 
 fn deploy_concurrency() -> usize {

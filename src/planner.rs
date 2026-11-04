@@ -64,6 +64,7 @@ pub struct HostPlan {
 pub struct PipelinePlan {
     pub hosts: Vec<HostPlan>,
     pub mode: PlanMode,
+    pub fail_early: bool,
 }
 
 pub fn plan(command: &CliCommand) -> Result<PipelinePlan> {
@@ -88,6 +89,7 @@ fn deploy_plan(args: &CommonBuildArgs, activation: ActivationPlan) -> Result<Pip
             out_link_name: format!("nixos-config-{hostname}"),
             keep_going: true,
         }),
+        fail_early: args.fail_early,
         mode: PlanMode::Deploy(activation),
     })
 }
@@ -100,6 +102,7 @@ fn build_only_plan(args: &CommonBuildArgs) -> PipelinePlan {
             out_link_name: format!("nixos-config-{hostname}"),
             keep_going: true,
         }),
+        fail_early: args.fail_early,
         mode: PlanMode::BuildOnly,
     }
 }
@@ -125,6 +128,7 @@ fn artifact_plan(args: &CommonBuildArgs, kind: ArtifactKind) -> PipelinePlan {
                 keep_going: false,
             }
         }),
+        fail_early: args.fail_early,
         mode: PlanMode::Artifact,
     }
 }

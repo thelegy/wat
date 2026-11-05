@@ -120,6 +120,17 @@ impl LixEventAdapter {
     }
 
     async fn log(&mut self, level: Level, message: &str) -> Result<()> {
+        // Concurrent evaluations can contend on Nix's optional evaluation cache.
+        // Nix explicitly ignores this failure; retain it only in the raw recording.
+        if message.starts_with("error (ignored): ")
+            && message.contains("SQLite database '")
+            && message.contains("/eval-cache-")
+            && message.contains(".sqlite")
+            && message.contains("' is busy")
+        {
+            return Ok(());
+        }
+
         self.events
             .send(Event::Log(LogEvent {
                 level,
@@ -152,4 +163,42 @@ fn parse_fields(value: Option<&Value>) -> Vec<LixField> {
             _ => None,
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::event::EventBus;
+
+    #[tokio::test]
+    async fn hides_ignored_eval_cache_contention_but_preserves_other_errors() {
+        let (bus, mut stream) = EventBus::new(16);
+        let mut adapter = LixEventAdapter::new(bus.sender());
+        let ignored = "error (ignored): \x1b[35;1m\x1b[31;1merror:\x1b[0m SQLite database '\x1b[35;1m/home/user/.cache/nix/eval-cache-v5/hash.sqlite\x1b[0m' is busy\x1b[0m";
+        for message in [ignored, "error (ignored): error: SQLite database '/cache/eval-cache-v5/hash.sqlite' is busy"] {
+            adapter.handle_stderr_line(message).await.unwrap();
+            adapter.handle_stderr_line(&format!("@nix {}", serde_json::json!({
+                "action": "msg", "level": 0, "msg": message
+            }))).await.unwrap();
+        }
+        let visible = [
+            "error: SQLite database '/cache/eval-cache-v5/hash.sqlite' is busy",
+            "error (ignored): error: SQLite database '/nix/var/nix/db/db.sqlite' is busy",
+            "error (ignored): error: SQLite database '/cache/eval-cache-v5/hash.sqlite' is corrupt",
+            "another diagnostic",
+        ];
+        for message in visible {
+            adapter.handle_stderr_line(&format!("@nix {}", serde_json::json!({
+                "action": "msg", "level": 0, "msg": message
+            }))).await.unwrap();
+        }
+        drop(adapter);
+        drop(bus);
+        for expected in visible {
+            let envelope = stream.recv().await.unwrap();
+            let Event::Log(log) = envelope.event else { panic!("expected log") };
+            assert_eq!(log.message, expected);
+        }
+        assert!(stream.recv().await.is_none());
+    }
 }

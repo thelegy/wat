@@ -3,6 +3,7 @@ pub mod cli;
 mod config;
 mod event;
 mod operations;
+mod palette;
 mod planner;
 mod recording;
 mod reducer;
@@ -42,13 +43,13 @@ fn init_logging() {
         let env = env_logger::Env::default().default_filter_or("info");
         if let Err(err) = env_logger::Builder::from_env(env)
             .format(|buffer, record| {
-                let style = buffer.default_level_style(record.level());
+                let style = palette::log_level_style(buffer, record.level());
                 writeln!(
                     buffer,
-                    "[{} {style}{:<5}{style:#} {}] {}",
+                    "[{} {} {style}{:>5}{style:#}] {}",
                     buffer.timestamp(),
-                    record.level(),
                     record.target(),
+                    record.level(),
                     record.args()
                 )
             })

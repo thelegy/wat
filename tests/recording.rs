@@ -125,10 +125,14 @@ fn replay_joins_output_chunks_and_finishes_partial_lines() {
         "trailing error",
     ]) {
         assert!(line.starts_with('['), "missing timestamp: {line}");
-        assert!(line.contains("Z INFO "), "missing log prefix: {line}");
+        assert!(line.contains(" INFO] "), "missing log level: {line}");
         assert!(line.ends_with(expected), "{line}");
-        let target = if expected == "other host" { "wat::reporter" } else { "     sirrah" };
-        assert!(line.contains(&format!(" INFO  {target}]")), "{line}");
+        let (host, stage) = if expected == "other host" {
+            ("wat::reporter", "")
+        } else {
+            ("sirrah", "deploy")
+        };
+        assert!(line.contains(&format!("Z {host:<13} {stage:<8}  INFO]")), "{line}");
     }
 
     let filtered = std::process::Command::new(env!("CARGO_BIN_EXE_wat"))
@@ -157,7 +161,7 @@ fn replay_joins_output_chunks_and_finishes_partial_lines() {
         .output().unwrap();
     assert!(legacy.status.success());
     let legacy_stderr = String::from_utf8(legacy.stderr).unwrap();
-    let messages = |text: &str| text.lines().map(|line| line.split_once(" INFO ").unwrap().1.to_string()).collect::<Vec<_>>();
+    let messages = |text: &str| text.lines().map(|line| line.split_once("Z ").unwrap().1.to_string()).collect::<Vec<_>>();
     assert_eq!(messages(&legacy_stderr), messages(&stderr));
 }
 

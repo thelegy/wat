@@ -458,14 +458,14 @@ impl PipelineReducer {
             .count();
         let mut columns = vec![MachineColumn {
             label: "failed",
-            color: 1, // terminal red
+            color: crate::palette::FAILED,
             count: failed,
         }];
-        for (phase, label, color) in [
-            (PipelinePhase::Evaluate, "eval", 68),    // blue
-            (PipelinePhase::Build, "build", 75),      // sky blue
-            (PipelinePhase::Upload, "copy", 220),     // golden yellow
-            (PipelinePhase::Deploy, "activate", 214), // amber orange
+        for (phase, label) in [
+            (PipelinePhase::Evaluate, "eval"),
+            (PipelinePhase::Build, "build"),
+            (PipelinePhase::Upload, "copy"),
+            (PipelinePhase::Deploy, "activate"),
         ] {
             if !self.hosts.values().any(|host| host.stages.contains(&phase)) {
                 continue;
@@ -479,7 +479,7 @@ impl PipelineReducer {
                 .count();
             columns.push(MachineColumn {
                 label,
-                color,
+                color: crate::palette::stage_color(phase),
                 count,
             });
         }
@@ -494,7 +494,7 @@ impl PipelineReducer {
             .count();
         columns.push(MachineColumn {
             label: "done",
-            color: 2, // terminal green
+            color: crate::palette::DONE,
             count,
         });
         columns

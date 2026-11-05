@@ -109,9 +109,22 @@ pub async fn replay(path: &Path) -> Result<()> {
     for line in BufReader::new(File::open(path)?).lines().skip(1) {
         let value: Value = serde_json::from_str(&line?)?;
         if let Some((command, host)) = legacy_ssh_command(&value) {
-            command_hosts.insert(command, host);
+            command_hosts.insert(
+                command,
+                EventScope {
+                    host: Some(host),
+                    phase: Some(crate::event::PipelinePhase::Deploy),
+                },
+            );
         }
         if let Some((command, host)) = legacy_copy_command(&value) {
+            command_hosts.insert(
+                command,
+                EventScope {
+                    host: Some(host.clone()),
+                    phase: Some(crate::event::PipelinePhase::Upload),
+                },
+            );
             copies.insert(command, host);
         }
         if value["kind"] != "event" {
@@ -182,9 +195,11 @@ pub async fn replay(path: &Path) -> Result<()> {
                         .map(|scope| serde_json::from_value(scope.clone()))
                         .transpose()?
                         .unwrap_or_default();
-                    if scope.host.is_none() {
-                        scope.host = value["command"].as_u64()
-                            .and_then(|id| command_hosts.get(&id)).cloned();
+                    if let Some(inferred) = value["command"].as_u64()
+                        .and_then(|id| command_hosts.get(&id))
+                    {
+                        scope.host = scope.host.or_else(|| inferred.host.clone());
+                        scope.phase = scope.phase.or(inferred.phase);
                     }
                     let sender = bus.sender().unrecorded().with_scope(scope);
                     if value["lix"] == true && value["stream"] == "stderr" {

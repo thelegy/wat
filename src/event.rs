@@ -63,6 +63,19 @@ pub enum PipelinePhase {
     Reboot,
 }
 
+impl PipelinePhase {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Evaluate => "evaluate",
+            Self::Build => "build",
+            Self::Upload => "upload",
+            Self::Deploy => "deploy",
+            Self::Activate => "activate",
+            Self::Reboot => "reboot",
+        }
+    }
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub enum HostEvent {
     Started {

@@ -1,7 +1,4 @@
-use std::{
-    collections::HashMap,
-    io::{IsTerminal, Write},
-};
+use std::{collections::HashMap, io::Write};
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -9,7 +6,8 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use log::Level;
 
 use crate::{
-    event::{ArtifactEvent, Event, EventStream, HostEvent, PipelineEvent},
+    event::{ArtifactEvent, Event, EventScope, EventStream, HostEvent, PipelineEvent},
+    palette,
     reducer::{ActivitySnapshot, MachineColumn, PipelineReducer, PipelineSnapshot},
 };
 
@@ -148,11 +146,24 @@ impl IndicatifReporter {
         self.host_width = hosts.map(|host| host.chars().count()).max().unwrap_or(0);
     }
 
-    fn log(&self, level: Level, host: Option<&str>, message: &str) {
-        let target = match host {
-            Some(host) => format!("{host:>width$}", width = self.host_width),
-            None => module_path!().to_string(),
+    fn log(&self, level: Level, scope: &EventScope, message: &str) {
+        let host = scope.host.as_deref().unwrap_or(module_path!());
+        let host = format!(
+            "{host:<width$}",
+            width = self.host_width.max(module_path!().len())
+        );
+        let stage = match scope.phase {
+            Some(phase) => {
+                let name = format!("{:<8}", phase.name());
+                if palette::colors_enabled() {
+                    palette::muted_stage(&name, phase)
+                } else {
+                    name
+                }
+            }
+            None => " ".repeat(8),
         };
+        let target = format!("{host} {stage}");
         self.progress.suspend(|| {
             log::log!(target: &target, level, "{message}");
         });
@@ -192,11 +203,11 @@ impl Reporter for IndicatifReporter {
             self.reducer.apply(&envelope);
 
             match &envelope.event {
-                Event::Log(log) => self.log(log.level, envelope.scope.host.as_deref(), &log.message),
+                Event::Log(log) => self.log(log.level, &envelope.scope, &log.message),
                 Event::Artifact(artifact) => self.emit_artifact(artifact),
                 Event::Output { bytes, .. } => {
                     for line in String::from_utf8_lossy(bytes).lines() {
-                        self.log(Level::Info, envelope.scope.host.as_deref(), line);
+                        self.log(Level::Info, &envelope.scope, line);
                     }
                 }
                 Event::Pipeline(PipelineEvent::Finished { .. }) => {}
@@ -217,7 +228,7 @@ fn summary_style() -> ProgressStyle {
 }
 
 fn activity_style() -> ProgressStyle {
-    ProgressStyle::with_template("{spinner:.yellow} {msg}")
+    ProgressStyle::with_template(&format!("{{spinner:.{}}} {{msg}}", palette::SPINNER_STYLE))
         .unwrap_or_else(|_| ProgressStyle::default_spinner())
 }
 
@@ -280,21 +291,21 @@ struct MachineDisplay {
 
 fn machine_display(columns: &[MachineColumn]) -> MachineDisplay {
     let keys = ["m0", "m1", "m2", "m3", "m4", "m5"];
-    let template = "{spinner:.yellow} ".to_string()
+    let template = format!("{{spinner:.{}}} ", palette::SPINNER_STYLE)
         + &columns
-        .iter()
-        .zip(keys)
-        .map(|(column, key)| {
-            let color = if column.count == 0 {
-                "dim".to_string()
-            } else {
-                column.color.to_string()
-            };
-            format!("{{{key}:.{color}}}")
-        })
-        .collect::<Vec<_>>()
-        .join(" / ")
-        + "  {wide_msg:.dim}";
+            .iter()
+            .zip(keys)
+            .map(|(column, key)| {
+                let color = if column.count == 0 {
+                    palette::MUTED_STYLE.to_string()
+                } else {
+                    column.color.to_string()
+                };
+                format!("{{{key}:.{color}}}")
+            })
+            .collect::<Vec<_>>()
+            .join(" / ")
+        + &format!("  {{wide_msg:.{}}}", palette::MUTED_STYLE);
     let mut style = ProgressStyle::with_template(&template).expect("valid machine status template");
     for (column, key) in columns.iter().zip(keys) {
         let count = column.count;
@@ -315,16 +326,14 @@ fn machine_display(columns: &[MachineColumn]) -> MachineDisplay {
     );
     // Carry label colors inside wide_msg so indicatif still truncates the legend.
     // Both labels and counts use the palette stored on MachineColumn.
-    let colors = std::io::stderr().is_terminal()
-        && std::env::var_os("NO_COLOR").is_none()
-        && std::env::var("TERM").as_deref() != Ok("dumb");
+    let colors = palette::colors_enabled();
     let labels = if colors {
         let colored = columns
             .iter()
-            .map(|column| format!("\x1b[38;5;{}m{}\x1b[39m", column.color, column.label))
+            .map(|column| palette::regular(column.label, column.color))
             .collect::<Vec<_>>()
             .join("/");
-        format!("\x1b[2m# {colored}\x1b[0m")
+        palette::muted(&format!("# {colored}"))
     } else {
         plain_labels.clone()
     };

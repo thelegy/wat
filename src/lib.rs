@@ -44,10 +44,12 @@ fn init_logging() {
         if let Err(err) = env_logger::Builder::from_env(env)
             .format(|buffer, record| {
                 let style = palette::log_level_style(buffer, record.level());
+                let now = jiff::Zoned::now();
+                let time = now.strftime("%H:%M:%S");
                 writeln!(
                     buffer,
                     "[{} {} {style}{:>5}{style:#}] {}",
-                    buffer.timestamp(),
+                    time,
                     record.target(),
                     record.level(),
                     record.args()

@@ -11,6 +11,7 @@ clap_complete = { version = "4.6.0", features = ["unstable-dynamic"] }
 config = { version = "0.15", default-features = false, features = ["toml", "json", "yaml", "ini", "ron", "json5", "corn"] }
 env_logger = "0.11"
 indicatif = "0.17"
+jiff = { version = "0.2", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo"] }
 log = { version = "0.4", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0.149"

@@ -472,6 +472,7 @@ dependencies = [
  "portable-atomic",
  "portable-atomic-util",
  "serde_core",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1192,6 +1193,7 @@ dependencies = [
  "config",
  "env_logger",
  "indicatif",
+ "jiff",
  "log",
  "serde",
  "serde_json",

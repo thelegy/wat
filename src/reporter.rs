@@ -202,7 +202,7 @@ impl Reporter for IndicatifReporter {
             }
             self.reducer.apply(&envelope);
 
-            match &envelope.event {
+            crate::with_log_time(envelope.log_time.as_deref(), || match &envelope.event {
                 Event::Log(log) => self.log(log.level, &envelope.scope, &log.message),
                 Event::Artifact(artifact) => self.emit_artifact(artifact),
                 Event::Output { bytes, .. } => {
@@ -213,7 +213,7 @@ impl Reporter for IndicatifReporter {
                 Event::Pipeline(PipelineEvent::Finished { .. }) => {}
                 Event::Host(HostEvent::Finished { .. }) => {}
                 _ => {}
-            }
+            });
 
             let snapshot = self.reducer.snapshot();
             self.render(snapshot);
@@ -453,6 +453,7 @@ mod tests {
                 }
                 for event in events {
                     reporter.reducer.apply(&EventEnvelope {
+                        log_time: None,
                         scope: Default::default(),
                         event,
                     });

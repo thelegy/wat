@@ -33,6 +33,7 @@ fn failed_build_replays_raw_input_without_executing_commands() {
         .map(|line| serde_json::from_str(line).unwrap())
         .collect();
     assert_eq!(entries[0]["version"], 1);
+    assert!(entries[0]["started_at"].as_str().unwrap().parse::<jiff::Timestamp>().is_ok());
     assert!(
         entries
             .iter()
@@ -132,7 +133,7 @@ fn replay_joins_output_chunks_and_finishes_partial_lines() {
         } else {
             ("sirrah", "deploy")
         };
-        assert!(line.contains(&format!("Z {host:<13} {stage:<8}  INFO]")), "{line}");
+        assert!(line.contains(&format!(" {host:<13} {stage:<8}  INFO]")), "{line}");
     }
 
     let filtered = std::process::Command::new(env!("CARGO_BIN_EXE_wat"))
@@ -161,7 +162,7 @@ fn replay_joins_output_chunks_and_finishes_partial_lines() {
         .output().unwrap();
     assert!(legacy.status.success());
     let legacy_stderr = String::from_utf8(legacy.stderr).unwrap();
-    let messages = |text: &str| text.lines().map(|line| line.split_once("Z ").unwrap().1.to_string()).collect::<Vec<_>>();
+    let messages = |text: &str| text.lines().map(|line| line.split_once(' ').unwrap().1.to_string()).collect::<Vec<_>>();
     assert_eq!(messages(&legacy_stderr), messages(&stderr));
 }
 
@@ -197,5 +198,42 @@ fn replay_keeps_final_machine_outcome_in_redirected_output() {
             "1 / 0 / 0 / 0  # failed/eval/build/done"
         };
         assert!(stderr.ends_with(&format!("{expected}\n")), "{stderr}");
+    }
+}
+
+#[test]
+fn replay_uses_recorded_time_in_local_timezone() {
+    use serde_json::json;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("timed.jsonl");
+    let entries = [
+        json!({"version": 1, "started_at": "2000-01-01T03:04:05.990Z"}),
+        json!({"kind": "event", "elapsed_us": 0, "envelope": {
+            "scope": {}, "event": {"Log": {"level": "INFO", "message": "recorded event"}}
+        }}),
+        json!({"kind": "output", "elapsed_us": 20000, "command": 1,
+            "stream": "stderr", "lix": true,
+            "bytes": b"@nix {\"action\":\"msg\",\"level\":3,\"msg\":\"parsed output\"}\n".to_vec()}),
+        json!({"kind": "output", "elapsed_us": 20000, "command": 2,
+            "stream": "stdout", "lix": false, "bytes": b"partial line".to_vec()}),
+        json!({"kind": "exit", "elapsed_us": 20000, "command": 2, "success": true}),
+    ];
+    std::fs::write(&path, entries.iter().map(|entry| format!("{entry}\n")).collect::<String>()).unwrap();
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_wat"))
+        .arg("replay").arg(path)
+        .env("TZ", "XXX-2")
+        .env("RUST_LOG", "info").env("RUST_LOG_STYLE", "never")
+        .output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    let lines: Vec<_> = stderr.lines().collect();
+    assert_eq!(lines.len(), 3, "{stderr}");
+    for (line, time, message) in [
+        (lines[0], "05:04:05", "recorded event"),
+        (lines[1], "05:04:06", "parsed output"),
+        (lines[2], "05:04:06", "partial line"),
+    ] {
+        assert!(line.starts_with(&format!("[{time} ")), "{line}");
+        assert!(line.ends_with(message), "{line}");
     }
 }

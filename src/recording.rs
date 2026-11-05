@@ -14,6 +14,14 @@ use std::{
     time::Instant,
 };
 
+tokio::task_local! {
+    static REPLAY_LOG_TIME: std::cell::RefCell<Option<String>>;
+}
+
+pub(crate) fn replay_log_time() -> Option<String> {
+    REPLAY_LOG_TIME.try_with(|time| time.borrow().clone()).ok().flatten()
+}
+
 struct Recording {
     file: File,
     start: Instant,
@@ -59,11 +67,13 @@ fn init_in(repository: &Path) -> Result<PathBuf> {
         .context("failed to create recording")?
         .keep()
         .context("failed to retain recording")?;
-    writeln!(file, "{}", json!({"version": 1}))?;
+    let start = Instant::now();
+    let started_at = jiff::Timestamp::now();
+    writeln!(file, "{}", json!({"version": 1, "started_at": started_at.to_string()}))?;
     RECORDING
         .set(Mutex::new(Recording {
             file,
-            start: Instant::now(),
+            start,
         }))
         .map_err(|_| anyhow::anyhow!("recording already initialized"))?;
     eprintln!("Recording: {}", path.display());
@@ -102,6 +112,10 @@ pub async fn replay(path: &Path) -> Result<()> {
     if header["version"] != 1 {
         bail!("unsupported recording version");
     }
+    let started_at = header.get("started_at")
+        .map(|value| value.as_str().context("invalid recording start time")?
+            .parse::<jiff::Timestamp>().context("invalid recording start time"))
+        .transpose()?;
     let mut stages = std::collections::BTreeMap::<String, Vec<crate::event::PipelinePhase>>::new();
     let mut planned = None;
     let mut copies = std::collections::HashMap::new();
@@ -169,7 +183,7 @@ pub async fn replay(path: &Path) -> Result<()> {
             stages,
         }))
         .await?;
-    let result = async {
+    let result = REPLAY_LOG_TIME.scope(std::cell::RefCell::new(None), async {
         let mut adapters = std::collections::HashMap::new();
         let mut previous = 0;
         let mut output = std::collections::HashMap::<(u64, bool), (EventSender, Vec<u8>)>::new();
@@ -182,6 +196,13 @@ pub async fn replay(path: &Path) -> Result<()> {
                 tokio::time::sleep(std::time::Duration::from_micros(elapsed - previous)).await;
             }
             previous = elapsed;
+            if let Some(start) = started_at {
+                let micros = i64::try_from(elapsed).context("recording timestamp out of range")?;
+                let timestamp = start.checked_add(std::time::Duration::from_micros(micros as u64))?;
+                let time = timestamp.to_zoned(jiff::tz::TimeZone::system())
+                    .strftime("%H:%M:%S").to_string();
+                REPLAY_LOG_TIME.with(|current| *current.borrow_mut() = Some(time));
+            }
             match value["kind"].as_str() {
                 Some("event") => {
                     let envelope: EventEnvelope =
@@ -281,7 +302,7 @@ pub async fn replay(path: &Path) -> Result<()> {
             }
         }
         Ok(())
-    }
+    })
     .await;
     drop(bus);
     reporter.await.context("reporter task failed")??;

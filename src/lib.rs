@@ -38,6 +38,21 @@ pub fn complete() {
     CompleteEnv::with_factory(cli::Cli::command).complete();
 }
 
+thread_local! {
+    static LOG_TIME: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+fn with_log_time(time: Option<&str>, action: impl FnOnce()) {
+    struct Reset(Option<String>);
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            LOG_TIME.with(|time| *time.borrow_mut() = self.0.take());
+        }
+    }
+    let _reset = Reset(LOG_TIME.with(|current| current.replace(time.map(str::to_owned))));
+    action();
+}
+
 fn init_logging() {
     INIT_LOGGER.call_once(|| {
         let env = env_logger::Env::default().default_filter_or("info");
@@ -45,7 +60,8 @@ fn init_logging() {
             .format(|buffer, record| {
                 let style = palette::log_level_style(buffer, record.level());
                 let now = jiff::Zoned::now();
-                let time = now.strftime("%H:%M:%S");
+                let time = LOG_TIME.with(|time| time.borrow().clone())
+                    .unwrap_or_else(|| now.strftime("%H:%M:%S").to_string());
                 writeln!(
                     buffer,
                     "[{} {} {style}{:>5}{style:#}] {}",

@@ -21,6 +21,8 @@ impl EventScope {
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub struct EventEnvelope {
+    #[serde(skip)]
+    pub log_time: Option<String>,
     pub scope: EventScope,
     pub event: Event,
 }
@@ -182,11 +184,12 @@ impl EventSender {
     pub async fn send(&self, event: Event) -> Result<()> {
         if self.record {
             crate::recording::write(
-                serde_json::json!({"kind": "event", "envelope": EventEnvelope { scope: self.scope.clone(), event: event.clone() }}),
+                serde_json::json!({"kind": "event", "envelope": EventEnvelope { log_time: None, scope: self.scope.clone(), event: event.clone() }}),
             );
         }
         self.tx
             .send(EventEnvelope {
+                log_time: crate::recording::replay_log_time(),
                 scope: self.scope.clone(),
                 event,
             })

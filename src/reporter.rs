@@ -37,6 +37,7 @@ impl IndicatifReporter {
         summary_bar.set_style(summary_style());
         let machine_bar = progress.add(ProgressBar::new_spinner());
         machine_bar.set_style(summary_style());
+        machine_bar.enable_steady_tick(std::time::Duration::from_millis(120));
 
         Self {
             reducer: PipelineReducer::new(),
@@ -279,7 +280,8 @@ struct MachineDisplay {
 
 fn machine_display(columns: &[MachineColumn]) -> MachineDisplay {
     let keys = ["m0", "m1", "m2", "m3", "m4", "m5"];
-    let template = columns
+    let template = "{spinner:.yellow} ".to_string()
+        + &columns
         .iter()
         .zip(keys)
         .map(|(column, key)| {

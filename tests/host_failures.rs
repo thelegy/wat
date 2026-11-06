@@ -61,7 +61,7 @@ exit 0
                 continue;
             }
             assert!(!output.status.success());
-            let stage = if failure == "copy" { "upload" } else { failure };
+            let stage = match failure { "copy" => "upload", "activate" => "deploy", stage => stage };
             assert!(stderr.contains(&format!("1 machine failed to {stage}: bad")), "{stderr}");
             assert!(!stderr.contains("exited with status"), "{stderr}");
             let recording = fs::read_dir(dir.path().join(".wat/logs")).unwrap().next().unwrap().unwrap().path();

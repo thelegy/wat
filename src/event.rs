@@ -72,7 +72,7 @@ impl PipelinePhase {
             Self::Build => "build",
             Self::Upload => "upload",
             Self::Deploy => "deploy",
-            Self::Activate => "activate",
+            Self::Activate => "deploy",
             Self::Reboot => "reboot",
         }
     }

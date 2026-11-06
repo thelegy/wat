@@ -448,7 +448,7 @@ mod tests {
         let output = String::from_utf8(output).unwrap();
         let lines: Vec<_> = output.lines().collect();
         assert_eq!(lines[0], "2 machines failed to build: alpha, zeta");
-        assert_eq!(lines[1], "1 machine failed to activate: beta");
+        assert_eq!(lines[1], "1 machine failed to deploy: beta");
         assert_eq!(lines.len(), 3);
         assert!(lines[2].contains("# failed/"));
     }

@@ -275,9 +275,9 @@ fn replay_reclassifies_legacy_service_errors_but_preserves_other_host_failures()
         assert!(!stderr.contains("exited with status"), "{stderr}");
         if other_failure {
             assert!(stderr.contains("1 machine failed to build: other"), "{stderr}");
-            assert!(stderr.ends_with("1 / 0 / 0 / 1  # failed/build/activate/done\n"), "{stderr}");
+            assert!(stderr.ends_with("1 / 0 / 0 / 1  # failed/build/deploy/done\n"), "{stderr}");
         } else {
-            assert!(stderr.ends_with("0 / 0 / 0 / 2  # failed/build/activate/done\n"), "{stderr}");
+            assert!(stderr.ends_with("0 / 0 / 0 / 2  # failed/build/deploy/done\n"), "{stderr}");
         }
     }
 }

@@ -132,12 +132,16 @@ impl PipelineReducer {
 
     pub fn failure_summaries(&self) -> Vec<String> {
         [PipelinePhase::Evaluate, PipelinePhase::Build, PipelinePhase::Upload,
-         PipelinePhase::Activate, PipelinePhase::Reboot, PipelinePhase::Deploy]
+         PipelinePhase::Deploy, PipelinePhase::Reboot]
             .into_iter()
             .filter_map(|phase| {
                 let mut hosts: Vec<_> = self.hosts.iter().filter(|(_, state)| {
-                    state.failed.contains(&phase)
-                        && (phase != PipelinePhase::Deploy || state.failed.len() == 1)
+                    if phase == PipelinePhase::Deploy {
+                        state.failed.contains(&PipelinePhase::Activate)
+                            || (state.failed.contains(&phase) && state.failed.len() == 1)
+                    } else {
+                        state.failed.contains(&phase)
+                    }
                 }).map(|(host, _)| host.as_str()).collect();
                 hosts.sort_unstable();
                 if hosts.is_empty() { return None; }
@@ -482,7 +486,7 @@ impl PipelineReducer {
             (PipelinePhase::Evaluate, "eval"),
             (PipelinePhase::Build, "build"),
             (PipelinePhase::Upload, "copy"),
-            (PipelinePhase::Deploy, "activate"),
+            (PipelinePhase::Deploy, "deploy"),
         ] {
             if !self.hosts.values().any(|host| host.stages.contains(&phase)) {
                 continue;
@@ -699,7 +703,7 @@ fn phase_name(phase: PipelinePhase) -> &'static str {
         PipelinePhase::Build => "building",
         PipelinePhase::Deploy => "deploying",
         PipelinePhase::Upload => "uploading",
-        PipelinePhase::Activate => "activating",
+        PipelinePhase::Activate => "deploying",
         PipelinePhase::Reboot => "rebooting",
     }
 }
@@ -817,7 +821,7 @@ mod tests {
                 .iter()
                 .map(|column| column.label)
                 .collect::<Vec<_>>(),
-            vec!["failed", "eval", "build", "copy", "activate", "done"]
+            vec!["failed", "eval", "build", "copy", "deploy", "done"]
         );
         assert_eq!(counts(&reducer), vec![0, 0, 0, 1, 0, 0]);
         reducer.apply_host(&HostEvent::Finished {

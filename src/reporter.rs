@@ -248,7 +248,10 @@ fn output_level(line: &str) -> Level {
             .is_some_and(|count| !count.is_empty() && count.bytes().all(|byte| byte.is_ascii_digit()));
     let derivation_path = line.starts_with("  /nix/store/")
         && line.ends_with(".drv") && !line.trim().contains(char::is_whitespace);
-    if fingerprint || art_border || art_row || derivation_heading || derivation_path {
+    let copying_path = line.starts_with("copying path '/nix/store/")
+        && line.ends_with("'...")
+        && (line.contains("' from '") || line.contains("' to '"));
+    if fingerprint || art_border || art_row || derivation_heading || derivation_path || copying_path {
         Level::Debug
     } else {
         Level::Info
@@ -474,6 +477,21 @@ mod tests {
         }
         fn flush(&self) -> io::Result<()> {
             Ok(())
+        }
+    }
+
+    #[test]
+    fn copying_path_progress_is_debug_output() {
+        for line in [
+            "copying path '/nix/store/example-grammar' from 'https://cache.nixos.org'...",
+            "copying path '/nix/store/example-grammar' to 'ssh://root@host'...",
+            "copying path '\x1b[35;1m/nix/store/example-grammar\x1b[0m' from 'https://cache.nixos.org'...",
+        ] {
+            assert_eq!(output_level(line), Level::Debug, "{line}");
+        }
+        for line in ["error: copying path '/nix/store/example' failed",
+            "copying path '/nix/store/example' from 'https://cache.nixos.org': connection failed"] {
+            assert_eq!(output_level(line), Level::Info, "{line}");
         }
     }
 

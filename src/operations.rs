@@ -82,7 +82,7 @@ async fn run_pipeline(
 
     events
         .send(Event::Log(LogEvent {
-            level: log::Level::Info,
+            level: log::Level::Debug,
             message: "Evaluating selected hosts".to_string(),
         }))
         .await?;
@@ -94,7 +94,7 @@ async fn run_pipeline(
         .await?;
     events
         .send(Event::Log(LogEvent {
-            level: log::Level::Info,
+            level: log::Level::Debug,
             message: "Building selected hosts".to_string(),
         }))
         .await?;

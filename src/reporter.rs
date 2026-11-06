@@ -251,7 +251,8 @@ fn output_level(line: &str) -> Level {
     let copying_path = line.starts_with("copying path '/nix/store/")
         && line.ends_with("'...")
         && (line.contains("' from '") || line.contains("' to '"));
-    if fingerprint || art_border || art_row || derivation_heading || derivation_path || copying_path {
+    let phase_announcement = matches!(line, "Evaluating selected hosts" | "Building selected hosts");
+    if fingerprint || art_border || art_row || derivation_heading || derivation_path || copying_path || phase_announcement {
         Level::Debug
     } else {
         Level::Info
@@ -477,6 +478,13 @@ mod tests {
         }
         fn flush(&self) -> io::Result<()> {
             Ok(())
+        }
+    }
+
+    #[test]
+    fn phase_announcements_are_debug_output() {
+        for line in ["Evaluating selected hosts", "Building selected hosts"] {
+            assert_eq!(output_level(line), Level::Debug);
         }
     }
 

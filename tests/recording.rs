@@ -281,3 +281,35 @@ fn replay_reclassifies_legacy_service_errors_but_preserves_other_host_failures()
         }
     }
 }
+
+#[test]
+fn replay_demotes_hostkeys_from_both_lix_and_direct_ssh_output() {
+    use serde_json::json;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("hostkeys.jsonl");
+    let hostkey = "Host key fingerprint is: SHA256:example";
+    let art = ["+--[ED25519 256]--+", "|  E.. .   o.+o   |", "+----[SHA256]-----+"];
+    let mut entries = vec![json!({"version": 1})];
+    for (command, lix) in [(1, true), (2, false)] {
+        for line in std::iter::once(hostkey).chain(art).chain(["Checking switch inhibitors... done"]) {
+            entries.push(json!({"kind": "output", "elapsed_us": 0, "command": command,
+                "scope": {"host": "example", "phase": "Deploy"},
+                "stream": "stderr", "lix": lix, "bytes": format!("{line}\n").as_bytes()}));
+        }
+    }
+    std::fs::write(&path, entries.iter().map(|entry| format!("{entry}\n")).collect::<String>()).unwrap();
+    for level in ["info", "debug"] {
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_wat"))
+            .arg("replay").arg(&path).env("RUST_LOG", level).env("RUST_LOG_STYLE", "never")
+            .output().unwrap();
+        assert!(output.status.success());
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert_eq!(stderr.matches("Checking switch inhibitors... done").count(), 2, "{stderr}");
+        for line in std::iter::once(hostkey).chain(art) {
+            assert_eq!(stderr.matches(line).count(), if level == "debug" { 2 } else { 0 }, "{stderr}");
+        }
+        for line in stderr.lines().filter(|line| line.contains(hostkey) || art.iter().any(|art| line.ends_with(art))) {
+            assert!(line.contains("DEBUG]"), "{line}");
+        }
+    }
+}

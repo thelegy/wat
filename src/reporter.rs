@@ -154,6 +154,7 @@ impl IndicatifReporter {
     }
 
     fn log(&self, level: Level, scope: &EventScope, message: &str) {
+        let level = if level == Level::Info { output_level(message) } else { level };
         let host = scope.host.as_deref().unwrap_or(module_path!());
         let host = format!(
             "{host:<width$}",
@@ -228,6 +229,16 @@ impl Reporter for IndicatifReporter {
 
         self.finish(&mut std::io::stderr())
     }
+}
+
+fn output_level(line: &str) -> Level {
+    let fingerprint = line.starts_with("Host key fingerprint is: ");
+    let art_border = line.len() == 19
+        && line.starts_with('+') && line.ends_with('+')
+        && line.contains('[') && line.contains(']');
+    let art_row = line.len() == 19 && line.starts_with('|') && line.ends_with('|')
+        && line[1..18].bytes().all(|byte| b" .o+=*BOX@%&#/^SE".contains(&byte));
+    if fingerprint || art_border || art_row { Level::Debug } else { Level::Info }
 }
 
 fn summary_style() -> ProgressStyle {
@@ -429,6 +440,23 @@ mod tests {
         }
         fn flush(&self) -> io::Result<()> {
             Ok(())
+        }
+    }
+
+    #[test]
+    fn ssh_fingerprints_and_randomart_are_debug_output() {
+        for line in [
+            "Host key fingerprint is: SHA256:example",
+            "+--[ED25519 256]--+",
+            "|         .+.     |",
+            "|    . = So.* o . |",
+            "+----[SHA256]-----+",
+        ] {
+            assert_eq!(output_level(line), Level::Debug, "{line}");
+        }
+        for line in ["activating the configuration...", "Host key verification failed.",
+            "WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!", "| service status  |"] {
+            assert_eq!(output_level(line), Level::Info, "{line}");
         }
     }
 

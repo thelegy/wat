@@ -154,7 +154,6 @@ impl IndicatifReporter {
     }
 
     fn log(&self, level: Level, scope: &EventScope, message: &str) {
-        let level = if level == Level::Info { output_level(message) } else { level };
         let host = scope.host.as_deref().unwrap_or(module_path!());
         let host = format!(
             "{host:<width$}",
@@ -173,7 +172,10 @@ impl IndicatifReporter {
         };
         let target = format!("{host} {stage}");
         self.progress.suspend(|| {
-            log::log!(target: &target, level, "{message}");
+            for line in message.lines() {
+                let level = if level == Level::Info { output_level(line) } else { level };
+                log::log!(target: &target, level, "{line}");
+            }
         });
     }
 
@@ -232,13 +234,45 @@ impl Reporter for IndicatifReporter {
 }
 
 fn output_level(line: &str) -> Level {
+    let plain = without_ansi(line);
+    let line = plain.as_ref();
     let fingerprint = line.starts_with("Host key fingerprint is: ");
     let art_border = line.len() == 19
         && line.starts_with('+') && line.ends_with('+')
         && line.contains('[') && line.contains(']');
     let art_row = line.len() == 19 && line.starts_with('|') && line.ends_with('|')
         && line[1..18].bytes().all(|byte| b" .o+=*BOX@%&#/^SE".contains(&byte));
-    if fingerprint || art_border || art_row { Level::Debug } else { Level::Info }
+    let derivation_heading = line == "this derivation will be built:"
+        || line.strip_prefix("these ")
+            .and_then(|rest| rest.strip_suffix(" derivations will be built:"))
+            .is_some_and(|count| !count.is_empty() && count.bytes().all(|byte| byte.is_ascii_digit()));
+    let derivation_path = line.starts_with("  /nix/store/")
+        && line.ends_with(".drv") && !line.trim().contains(char::is_whitespace);
+    if fingerprint || art_border || art_row || derivation_heading || derivation_path {
+        Level::Debug
+    } else {
+        Level::Info
+    }
+}
+
+// Classify the visible text while preserving the original colors in the log.
+fn without_ansi(line: &str) -> std::borrow::Cow<'_, str> {
+    if !line.contains('\x1b') {
+        return std::borrow::Cow::Borrowed(line);
+    }
+    let mut plain = String::with_capacity(line.len());
+    let mut chars = line.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\x1b' && chars.peek() == Some(&'[') {
+            chars.next();
+            for ch in chars.by_ref() {
+                if ('@'..='~').contains(&ch) { break; }
+            }
+        } else {
+            plain.push(ch);
+        }
+    }
+    std::borrow::Cow::Owned(plain)
 }
 
 fn summary_style() -> ProgressStyle {
@@ -440,6 +474,21 @@ mod tests {
         }
         fn flush(&self) -> io::Result<()> {
             Ok(())
+        }
+    }
+
+    #[test]
+    fn derivation_plan_details_are_debug_output() {
+        for line in ["these 13 derivations will be built:", "this derivation will be built:",
+            "these \x1b[35;1m15\x1b[0m derivations will be built:",
+            "these \x1b[35;1m13\x1b[0m derivations will be built:",
+            "  \x1b[35;1m/nix/store/example.drv\x1b[0m",
+            "  /nix/store/nnvbgzc0cnv6ypiap2rnww9hpmkp06a8-system-path.drv"] {
+            assert_eq!(output_level(line), Level::Debug, "{line}");
+        }
+        for line in ["error: failed to build /nix/store/example.drv",
+            "building '/nix/store/example.drv'...", "  /nix/store/example.drv failed"] {
+            assert_eq!(output_level(line), Level::Info, "{line}");
         }
     }
 

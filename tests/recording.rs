@@ -313,3 +313,25 @@ fn replay_demotes_hostkeys_from_both_lix_and_direct_ssh_output() {
         }
     }
 }
+
+#[test]
+fn replay_demotes_multiline_derivation_plans_without_hiding_diagnostics() {
+    use serde_json::json;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("derivations.jsonl");
+    let message = "these \x1b[35;1m13\x1b[0m derivations will be built:\n  \x1b[35;1m/nix/store/example-system-path.drv\x1b[0m\nordinary diagnostic";
+    let raw = format!("@nix {}\n", json!({"action": "msg", "level": 3, "msg": message}));
+    let entries = [json!({"version": 1}), json!({"kind": "output", "elapsed_us": 0,
+        "command": 1, "stream": "stderr", "lix": true, "bytes": raw.as_bytes()})];
+    std::fs::write(&path, entries.iter().map(|entry| format!("{entry}\n")).collect::<String>()).unwrap();
+    for level in ["info", "debug"] {
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_wat"))
+            .arg("replay").arg(&path).env("RUST_LOG", level).output().unwrap();
+        assert!(output.status.success());
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert!(stderr.contains("ordinary diagnostic"), "{stderr}");
+        for detail in ["derivations will be built:", "/nix/store/example-system-path.drv"] {
+            assert_eq!(stderr.contains(detail), level == "debug", "{stderr}");
+        }
+    }
+}

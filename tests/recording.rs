@@ -335,3 +335,29 @@ fn replay_demotes_multiline_derivation_plans_without_hiding_diagnostics() {
         }
     }
 }
+
+#[test]
+fn replay_accepts_truncated_tail_but_rejects_corrupt_or_nonfinal_entries() {
+    use serde_json::json;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("incomplete.jsonl");
+    let output_entry = json!({"kind": "output", "elapsed_us": 0, "command": 1,
+        "stream": "stdout", "lix": false, "bytes": b"last complete output".to_vec()});
+    let prefix = format!("{{\"version\":1}}\n{output_entry}\n");
+    for (tail, success) in [
+        ("{\"bytes\":[1,2,", true),
+        ("{\"kind\":\"out", true),
+        ("{\"bytes\":[1,2,\n{}\n", false),
+        ("{garbage}", false),
+    ] {
+        std::fs::write(&path, format!("{prefix}{tail}")).unwrap();
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_wat"))
+            .arg("replay").arg(&path).env("RUST_LOG", "info").output().unwrap();
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert_eq!(output.status.success(), success, "{stderr}");
+        if success {
+            assert!(stderr.contains("last complete output"), "{stderr}");
+            assert!(stderr.contains("Ignoring incomplete final recording entry"), "{stderr}");
+        }
+    }
+}

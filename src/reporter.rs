@@ -252,7 +252,8 @@ fn output_level(line: &str) -> Level {
         && line.ends_with("'...")
         && (line.contains("' from '") || line.contains("' to '"));
     let phase_announcement = matches!(line, "Evaluating selected hosts" | "Building selected hosts");
-    if fingerprint || art_border || art_row || derivation_heading || derivation_path || copying_path || phase_announcement {
+    let fetching_git_input = line.starts_with("fetching git input '") && line.ends_with("'");
+    if fingerprint || art_border || art_row || derivation_heading || derivation_path || copying_path || phase_announcement || fetching_git_input {
         Level::Debug
     } else {
         Level::Info
@@ -479,6 +480,17 @@ mod tests {
         fn flush(&self) -> io::Result<()> {
             Ok(())
         }
+    }
+
+    #[test]
+    fn git_fetch_progress_is_debug_output() {
+        for line in [
+            "fetching git input 'git+file:///srv/sync/repos/yaner'",
+            "fetching \x1b[35;1mgit\x1b[0m input '\x1b[35;1mgit+file:///srv/sync/repos/yaner\x1b[0m'",
+        ] {
+            assert_eq!(output_level(line), Level::Debug, "{line}");
+        }
+        assert_eq!(output_level("error: fetching git input failed"), Level::Info);
     }
 
     #[test]

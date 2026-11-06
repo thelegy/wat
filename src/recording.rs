@@ -106,6 +106,29 @@ pub fn start(command: &tokio::process::Command) -> u64 {
     id
 }
 
+// An interrupted writer may leave its final JSONL entry unfinished. Only ignore
+// JSON EOF at the end of the file; other parse and I/O errors remain errors.
+fn recording_values<'a>(
+    lines: impl Iterator<Item = std::io::Result<String>> + 'a,
+    truncated: &'a mut bool,
+) -> impl Iterator<Item = Result<Value>> + 'a {
+    let mut lines = lines.peekable();
+    std::iter::from_fn(move || {
+        let line = match lines.next()? {
+            Ok(line) => line,
+            Err(error) => return Some(Err(error.into())),
+        };
+        match serde_json::from_str(&line) {
+            Ok(value) => Some(Ok(value)),
+            Err(error) if error.is_eof() && lines.peek().is_none() => {
+                *truncated = true;
+                None
+            }
+            Err(error) => Some(Err(error.into())),
+        }
+    })
+}
+
 pub async fn replay(path: &Path) -> Result<()> {
     let mut lines = BufReader::new(File::open(path).context("failed to open recording")?).lines();
     let header: Value = serde_json::from_str(&lines.next().context("empty recording")??)?;
@@ -123,8 +146,9 @@ pub async fn replay(path: &Path) -> Result<()> {
     let mut activation_host = None;
     let mut activation_commands = std::collections::HashMap::new();
     let mut service_error_hosts = std::collections::HashSet::new();
-    for line in BufReader::new(File::open(path)?).lines().skip(1) {
-        let value: Value = serde_json::from_str(&line?)?;
+    let mut truncated = false;
+    for value in recording_values(BufReader::new(File::open(path)?).lines().skip(1), &mut truncated) {
+        let value = value?;
         if let Some((command, host)) = legacy_ssh_command(&value) {
             command_hosts.insert(
                 command,
@@ -211,8 +235,9 @@ pub async fn replay(path: &Path) -> Result<()> {
         let mut previous = 0;
         let mut failed_hosts = std::collections::HashSet::new();
         let mut output = std::collections::HashMap::<(u64, bool), (EventSender, Vec<u8>)>::new();
-        for line in lines {
-            let value: Value = serde_json::from_str(&line?)?;
+        let mut replay_truncated = false;
+        for value in recording_values(lines, &mut replay_truncated) {
+            let value = value?;
             let elapsed = value["elapsed_us"]
                 .as_u64()
                 .context("missing recording timestamp")?;
@@ -357,6 +382,12 @@ pub async fn replay(path: &Path) -> Result<()> {
                 sender.send(Event::Output { stderr, bytes })
                     .await?;
             }
+        }
+        if truncated {
+            bus.sender().unrecorded().send(Event::Log(LogEvent {
+                level: log::Level::Warn,
+                message: "Ignoring incomplete final recording entry; showing last recorded state".into(),
+            })).await?;
         }
         Ok(())
     })

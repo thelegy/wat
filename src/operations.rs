@@ -131,7 +131,7 @@ async fn run_pipeline(
     if errors.is_empty() {
         Ok(())
     } else {
-        bail!("{}", errors.iter().map(|error| format!("{error:#}")).collect::<Vec<_>>().join("\n"))
+        Err(PipelineFailed(errors.iter().map(|error| format!("{error:#}")).collect::<Vec<_>>().join("\n")).into())
     }
 }
 
@@ -202,13 +202,13 @@ async fn build_host(
         }))
         .await?;
 
-    let temp_dir = Builder::new()
-        .prefix("wat-deploy.")
-        .tempdir()
-        .context("failed to create temporary directory")?;
-    let out_link = temp_dir.path().join(&host.out_link_name);
-
     let result = async {
+        let temp_dir = Builder::new()
+            .prefix("wat-deploy.")
+            .tempdir()
+            .context("failed to create temporary directory")?;
+        let out_link = temp_dir.path().join(&host.out_link_name);
+
         backend
             .build_installable(
                 &host.installable,
@@ -419,7 +419,7 @@ async fn deploy_local(
     deployment_stage(
         events,
         PipelinePhase::Activate,
-        run_command_status("sudo", &[switch_to_config, plan.command], events),
+        run_activation("sudo", &[switch_to_config, plan.command], events),
     )
     .await
     .with_context(|| format!("failed to run switch-to-configuration {}", plan.command))?;
@@ -470,14 +470,14 @@ async fn deploy_remote(
     }
 
     let remote_switch_cmd = format!(
-        "{}/bin/switch-to-configuration {} && sync",
+        "{}/bin/switch-to-configuration {}",
         store_path.display(),
         plan.command
     );
     deployment_stage(
         &events,
         PipelinePhase::Activate,
-        run_command_status(
+        run_activation(
             "ssh",
             &[remote_host.as_str(), remote_switch_cmd.as_str()],
             &events,
@@ -485,6 +485,10 @@ async fn deploy_remote(
     )
     .await
     .with_context(|| format!("failed to switch configuration remotely on {hostname}"))?;
+
+    run_command_status("ssh", &[remote_host.as_str(), "sync"], &events)
+        .await
+        .with_context(|| format!("failed to sync remote filesystem on {hostname}"))?;
 
     if plan.reboot {
         deployment_stage(
@@ -497,6 +501,43 @@ async fn deploy_remote(
     }
 
     Ok(())
+}
+
+// The reporter already presents pipeline failures grouped by host and stage.
+#[derive(Debug)]
+pub(crate) struct PipelineFailed(pub(crate) String);
+
+impl std::fmt::Display for PipelineFailed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for PipelineFailed {}
+
+pub fn failure_reported(error: &anyhow::Error) -> bool {
+    error.is::<PipelineFailed>()
+}
+
+async fn run_activation(program: &str, args: &[&str], events: &EventSender) -> Result<()> {
+    let mut command = Command::new(program);
+    command.args(args);
+    let status = crate::recording::execute_visible(&mut command, events).await?;
+    activation_result(status, events).await
+}
+
+async fn activation_result(status: std::process::ExitStatus, events: &EventSender) -> Result<()> {
+    if status.code() == Some(4) {
+        events.with_phase(PipelinePhase::Activate).send(Event::Log(LogEvent {
+            level: log::Level::Warn,
+            message: "Configuration activated, but activation reported service errors (exit status 4)".into(),
+        })).await?;
+        Ok(())
+    } else if status.success() {
+        Ok(())
+    } else {
+        bail!("activation exited with status {status}")
+    }
 }
 
 async fn run_command_status(program: &str, args: &[&str], events: &EventSender) -> Result<()> {
@@ -536,4 +577,30 @@ async fn deployment_stage(
         }))
         .await?;
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::process::ExitStatusExt;
+
+    #[tokio::test]
+    async fn service_errors_complete_activation_with_a_host_warning() {
+        let (bus, mut stream) = EventBus::new(16);
+        let events = bus.sender().with_host("sirrah");
+        deployment_stage(&events, PipelinePhase::Activate,
+            activation_result(std::process::ExitStatus::from_raw(4 << 8), &events))
+            .await.unwrap();
+        assert!(matches!(stream.recv().await.unwrap().event,
+            Event::Host(HostEvent::Started { .. })));
+        let warning = stream.recv().await.unwrap();
+        assert_eq!(warning.scope.host.as_deref(), Some("sirrah"));
+        assert_eq!(warning.scope.phase, Some(PipelinePhase::Activate));
+        assert!(matches!(warning.event, Event::Log(LogEvent { level: log::Level::Warn, .. })));
+        assert!(matches!(stream.recv().await.unwrap().event,
+            Event::Host(HostEvent::Finished { success: true, .. })));
+        for code in [1, 2, 3, 255] {
+            assert!(activation_result(std::process::ExitStatus::from_raw(code << 8), &events).await.is_err());
+        }
+    }
 }

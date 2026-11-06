@@ -86,3 +86,7 @@ fn prepare_environment() -> Result<()> {
 
     Ok(())
 }
+
+pub fn failure_reported(error: &anyhow::Error) -> bool {
+    operations::failure_reported(error)
+}

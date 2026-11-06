@@ -5,7 +5,7 @@ use serde_json::Value;
 
 #[test]
 fn healthy_hosts_finish_despite_build_copy_or_activation_failures() {
-    for failure in ["build", "copy", "activate"] {
+    for failure in ["build", "copy", "activate", "service-errors"] {
         for fail_early in [false, true] {
             let dir = tempfile::tempdir().unwrap();
             let bin = dir.path().join("bin");
@@ -31,7 +31,11 @@ esac
 exit 0
 "#;
             let ssh = r#"#!/bin/sh
-case "$*" in *root@bad*) [ "$FAILURE" = activate ] && exit 9;; esac
+case "$*" in *root@bad*)
+  [ "$FAILURE" = activate ] && exit 9
+  case "$*" in *switch-to-configuration*) [ "$FAILURE" = service-errors ] && exit 4;; esac
+  ;;
+esac
 exit 0
 "#;
             for (name, contents) in [("nix", nix), ("ssh", ssh)] {
@@ -49,7 +53,17 @@ exit 0
                 .args(["dry-activate", "bad", "healthy"]);
             if fail_early { command.arg("--fail-early"); }
             let output = command.output().unwrap();
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if failure == "service-errors" {
+                assert!(output.status.success(), "{stderr}");
+                assert!(stderr.contains("activation reported service errors"));
+                assert!(!stderr.contains("machines failed to"));
+                continue;
+            }
             assert!(!output.status.success());
+            let stage = if failure == "copy" { "upload" } else { failure };
+            assert!(stderr.contains(&format!("1 machine failed to {stage}: bad")), "{stderr}");
+            assert!(!stderr.contains("exited with status"), "{stderr}");
             let recording = fs::read_dir(dir.path().join(".wat/logs")).unwrap().next().unwrap().unwrap().path();
             let entries: Vec<Value> = fs::read_to_string(recording).unwrap().lines().map(|line| serde_json::from_str(line).unwrap()).collect();
             let healthy_done = entries.iter().any(|entry| {

@@ -130,6 +130,23 @@ impl PipelineReducer {
         }
     }
 
+    pub fn failure_summaries(&self) -> Vec<String> {
+        [PipelinePhase::Evaluate, PipelinePhase::Build, PipelinePhase::Upload,
+         PipelinePhase::Activate, PipelinePhase::Reboot, PipelinePhase::Deploy]
+            .into_iter()
+            .filter_map(|phase| {
+                let mut hosts: Vec<_> = self.hosts.iter().filter(|(_, state)| {
+                    state.failed.contains(&phase)
+                        && (phase != PipelinePhase::Deploy || state.failed.len() == 1)
+                }).map(|(host, _)| host.as_str()).collect();
+                hosts.sort_unstable();
+                if hosts.is_empty() { return None; }
+                Some(format!("{} {} failed to {}: {}", hosts.len(),
+                    if hosts.len() == 1 { "machine" } else { "machines" },
+                    phase.name(), hosts.join(", ")))
+            }).collect()
+    }
+
     pub fn snapshot(&self) -> PipelineSnapshot {
         PipelineSnapshot {
             summary: format!("Packages: {}", self.status_summary()),

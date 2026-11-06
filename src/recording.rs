@@ -1,7 +1,7 @@
 //! Versioned JSONL input capture. Raw Lix input is replayed through the current adapter.
 use crate::{
     backend::lix_parser::LixEventAdapter,
-    event::{Event, EventBus, EventEnvelope, EventScope, EventSender},
+    event::{Event, EventBus, EventEnvelope, EventScope, EventSender, HostEvent, PipelineEvent, PipelinePhase, LogEvent},
     reporter::{IndicatifReporter, Reporter},
 };
 use anyhow::{Context, Result, bail};
@@ -120,6 +120,9 @@ pub async fn replay(path: &Path) -> Result<()> {
     let mut planned = None;
     let mut copies = std::collections::HashMap::new();
     let mut command_hosts = std::collections::HashMap::new();
+    let mut activation_host = None;
+    let mut activation_commands = std::collections::HashMap::new();
+    let mut service_error_hosts = std::collections::HashSet::new();
     for line in BufReader::new(File::open(path)?).lines().skip(1) {
         let value: Value = serde_json::from_str(&line?)?;
         if let Some((command, host)) = legacy_ssh_command(&value) {
@@ -141,10 +144,30 @@ pub async fn replay(path: &Path) -> Result<()> {
             );
             copies.insert(command, host);
         }
+        if value["kind"] == "command" {
+            let is_activation = value["args"].as_array().is_some_and(|args| {
+                args.iter().filter_map(Value::as_str).any(|arg| arg.contains("/bin/switch-to-configuration"))
+            });
+            if is_activation {
+                let host = legacy_ssh_command(&value).map(|(_, host)| host)
+                    .or_else(|| activation_host.clone());
+                if let (Some(id), Some(host)) = (value["command"].as_u64(), host) {
+                    activation_commands.insert(id, host);
+                }
+            }
+        }
+        if value["kind"] == "exit" && value["code"] == 4 {
+            if let Some(host) = value["command"].as_u64().and_then(|id| activation_commands.get(&id)) {
+                service_error_hosts.insert(host.clone());
+            }
+        }
         if value["kind"] != "event" {
             continue;
         }
         let envelope: EventEnvelope = serde_json::from_value(value["envelope"].clone())?;
+        if let Event::Host(HostEvent::Started { host, phase: PipelinePhase::Activate }) = &envelope.event {
+            activation_host = Some(host.clone());
+        }
         match envelope.event {
             Event::Pipeline(crate::event::PipelineEvent::Planned { stages }) => {
                 planned = Some(stages)
@@ -186,6 +209,7 @@ pub async fn replay(path: &Path) -> Result<()> {
     let result = REPLAY_LOG_TIME.scope(std::cell::RefCell::new(None), async {
         let mut adapters = std::collections::HashMap::new();
         let mut previous = 0;
+        let mut failed_hosts = std::collections::HashSet::new();
         let mut output = std::collections::HashMap::<(u64, bool), (EventSender, Vec<u8>)>::new();
         for line in lines {
             let value: Value = serde_json::from_str(&line?)?;
@@ -205,9 +229,31 @@ pub async fn replay(path: &Path) -> Result<()> {
             }
             match value["kind"].as_str() {
                 Some("event") => {
-                    let envelope: EventEnvelope =
+                    let mut envelope: EventEnvelope =
                         serde_json::from_value(value["envelope"].clone())?;
                     let sender = bus.sender().unrecorded().with_scope(envelope.scope);
+                    match &mut envelope.event {
+                        Event::Host(HostEvent::Finished { host, phase, success }) => {
+                            if !*success && service_error_hosts.contains(host)
+                                && matches!(phase, PipelinePhase::Activate | PipelinePhase::Deploy)
+                            {
+                                *success = true;
+                                if *phase == PipelinePhase::Activate {
+                                    sender.with_host(host.clone()).with_phase(*phase).send(Event::Log(LogEvent {
+                                        level: log::Level::Warn,
+                                        message: "Configuration activated, but activation reported service errors (exit status 4)".into(),
+                                    })).await?;
+                                }
+                            }
+                            if !*success { failed_hosts.insert(host.clone()); }
+                        }
+                        Event::Pipeline(PipelineEvent::Finished { success })
+                        | Event::Pipeline(PipelineEvent::PhaseFinished { success, .. })
+                            if !service_error_hosts.is_empty() => {
+                                *success = failed_hosts.is_empty();
+                            }
+                        _ => {}
+                    }
                     sender.send(envelope.event).await?;
                 }
                 Some("output") => {
@@ -253,7 +299,18 @@ pub async fn replay(path: &Path) -> Result<()> {
                 }
                 Some("outcome") => {
                     if let Some(error) = value["error"].as_str() {
-                        bail!("{error}");
+                        if !failed_hosts.is_empty() {
+                            return Err(crate::operations::PipelineFailed(error.to_owned()).into());
+                        }
+                        // Legacy outcomes contain the activation error that we just
+                        // reclassified. Preserve any unrelated infrastructure errors.
+                        let only_service_errors = !service_error_hosts.is_empty() && error.lines().all(|line| {
+                            service_error_hosts.iter().any(|host| line == format!(
+                                "failed to switch configuration remotely on {host}: ssh exited with status exit status: 4"
+                            )) || line.starts_with("failed to run switch-to-configuration ")
+                                && line.ends_with(": sudo exited with status exit status: 4")
+                        });
+                        if !only_service_errors { bail!("{error}"); }
                     }
                 }
                 Some("exit") => {

@@ -72,6 +72,13 @@ impl IndicatifReporter {
             bar.finish_and_clear();
         }
         self.summary_bar.finish_and_clear();
+        for summary in self.reducer.failure_summaries() {
+            if self.progress.is_hidden() {
+                writeln!(output, "{summary}")?;
+            } else {
+                self.progress.println(summary)?;
+            }
+        }
         let snapshot = self.reducer.snapshot();
         if snapshot.machines.iter().any(|column| column.count > 0) {
             self.render_machines(&snapshot.machines);
@@ -423,6 +430,27 @@ mod tests {
         fn flush(&self) -> io::Result<()> {
             Ok(())
         }
+    }
+
+    #[test]
+    fn failures_are_grouped_before_final_status_without_duplicate_deploy_failures() {
+        let mut reporter = IndicatifReporter::new();
+        reporter.progress.set_draw_target(ProgressDrawTarget::hidden());
+        for (host, phase) in [("zeta", PipelinePhase::Build), ("alpha", PipelinePhase::Build),
+            ("beta", PipelinePhase::Activate), ("beta", PipelinePhase::Deploy)] {
+            reporter.reducer.apply(&EventEnvelope {
+                log_time: None, scope: Default::default(),
+                event: Event::Host(HostEvent::Finished { host: host.into(), phase, success: false }),
+            });
+        }
+        let mut output = Vec::new();
+        reporter.finish(&mut output).unwrap();
+        let output = String::from_utf8(output).unwrap();
+        let lines: Vec<_> = output.lines().collect();
+        assert_eq!(lines[0], "2 machines failed to build: alpha, zeta");
+        assert_eq!(lines[1], "1 machine failed to activate: beta");
+        assert_eq!(lines.len(), 3);
+        assert!(lines[2].contains("# failed/"));
     }
 
     #[test]

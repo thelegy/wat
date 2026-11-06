@@ -13,7 +13,9 @@ fn main() {
     };
 
     if let Err(error) = runtime.block_on(wat::run()) {
-        eprintln!("{error}");
+        if !wat::failure_reported(&error) {
+            eprintln!("{error}");
+        }
         std::process::exit(1);
     }
 }

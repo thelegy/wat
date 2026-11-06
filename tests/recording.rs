@@ -61,7 +61,8 @@ fn failed_build_replays_raw_input_without_executing_commands() {
     assert!(!replay.status.success());
     let stderr = String::from_utf8_lossy(&replay.stderr);
     assert!(stderr.contains("raw diagnostic"), "{stderr}");
-    assert!(stderr.contains("failed to build"), "{stderr}");
+    assert!(stderr.contains("1 machine failed to build: example"), "{stderr}");
+    assert!(!stderr.contains("exited with status"), "{stderr}");
     assert!(!stderr.contains("Recording:"), "{stderr}");
     assert!(!String::from_utf8_lossy(&replay.stdout).contains("captured stdout"));
     assert_eq!(
@@ -235,5 +236,48 @@ fn replay_uses_recorded_time_in_local_timezone() {
     ] {
         assert!(line.starts_with(&format!("[{time} ")), "{line}");
         assert!(line.ends_with(message), "{line}");
+    }
+}
+
+#[test]
+fn replay_reclassifies_legacy_service_errors_but_preserves_other_host_failures() {
+    use serde_json::json;
+    for other_failure in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("activation.jsonl");
+        let mut entries = vec![json!({"version": 1})];
+        let event = |event| json!({"kind": "event", "elapsed_us": 0,
+            "envelope": {"scope": {}, "event": event}});
+        entries.push(event(json!({"Pipeline": {"Planned": {"stages": [
+            ["sirrah", ["Build", "Deploy"]], ["other", ["Build"]]
+        ]}}})));
+        for (host, phase, success) in [("sirrah", "Build", true), ("other", "Build", !other_failure)] {
+            entries.push(event(json!({"Host": {"Finished": {"host": host, "phase": phase, "success": success}}})));
+        }
+        entries.push(event(json!({"Host": {"Started": {"host": "sirrah", "phase": "Activate"}}})));
+        entries.push(json!({"kind": "command", "elapsed_us": 0, "command": 1,
+            "program": "ssh", "args": ["root@sirrah", "/nix/store/system/bin/switch-to-configuration test && sync"]}));
+        entries.push(json!({"kind": "exit", "elapsed_us": 0, "command": 1, "code": 4, "success": false}));
+        for phase in ["Activate", "Deploy"] {
+            entries.push(event(json!({"Host": {"Finished": {"host": "sirrah", "phase": phase, "success": false}}})));
+        }
+        entries.push(event(json!({"Pipeline": {"Finished": {"success": false}}})));
+        let mut error = "failed to switch configuration remotely on sirrah: ssh exited with status exit status: 4".to_owned();
+        if other_failure { error.push_str("\nfailed to build other: lix exited with status exit status: 1"); }
+        entries.push(json!({"kind": "outcome", "elapsed_us": 0, "error": error}));
+        std::fs::write(&path, entries.iter().map(|entry| format!("{entry}\n")).collect::<String>()).unwrap();
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_wat"))
+            .arg("replay").arg(&path).env("RUST_LOG", "info").output().unwrap();
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert_eq!(output.status.success(), !other_failure, "{stderr}");
+        assert!(stderr.contains("sirrah") && stderr.contains("activation reported service errors"), "{stderr}");
+        assert!(!stderr.contains("failed to activate"), "{stderr}");
+        assert!(!stderr.contains("exited with status"), "{stderr}");
+        if other_failure {
+            assert!(stderr.contains("1 machine failed to build: other"), "{stderr}");
+            assert!(stderr.ends_with("1 / 0 / 0 / 1  # failed/build/activate/done\n"), "{stderr}");
+        } else {
+            assert!(stderr.ends_with("0 / 0 / 0 / 2  # failed/build/activate/done\n"), "{stderr}");
+        }
     }
 }

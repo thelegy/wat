@@ -74,6 +74,26 @@ omitted settings use defaults; malformed files and unknown settings are errors.
 
 ### Machine-readable build results
 
+The legacy Python prebuild tool has been removed. Replace `nix run .#prebuild-script` (or `wat-prebuild`) in consuming flakes with:
+
+```sh
+nix develop -c wat build --all --results-file ./build-results.json
+```
+
+This is a breaking change: the `packages.<system>.prebuild-script` output and
+`wat-prebuild` / `wat-prebuild-script` overlay packages are no longer provided.
+Remove `wat.enableAutoBuildTargets` and `wat.extraBuildTargets` from flake
+configuration; these options have also been removed. `--all` selects NixOS hosts;
+use explicit hostnames for a subset. Arbitrary extra Nix build targets must be
+built separately with `nix build`.
+
+Update automation to parse the JSON report described below instead of the old
+numeric, line-based output. Compare per-host outcomes and validate the report's
+version and completeness, including on command failure. The legacy evaluation
+and build timeouts and separate evaluation-failure categories are not retained;
+configure any required timeout in the calling job. The wat CLI remains in the
+dev shell, and build progress and human interaction are unchanged.
+
 `wat build [HOST ... | --all | -A] --results-file PATH` writes a versioned
 JSON report without changing terminal rendering, logs, or stdout store paths.
 The option is available only for `build`. For example:

@@ -1,25 +1,9 @@
 {
-  config,
   inputs,
-  lib,
   ...
 }:
 
-let
-  cfg = config.wat;
-in
 {
-
-  options.wat = {
-    enableAutoBuildTargets = lib.mkOption {
-      type = lib.types.bool;
-      default = true;
-    };
-    extraBuildTargets = lib.mkOption {
-      type = lib.types.listOf lib.types.path;
-      default = [ ];
-    };
-  };
 
   config.perSystem =
     { system, inputs', ... }:
@@ -33,10 +17,6 @@ in
 
       packages = {
         inherit (pkgs) wat-deploy-tools;
-        prebuild-script = pkgs.wat-prebuild-script.override {
-          inherit (cfg) enableAutoBuildTargets extraBuildTargets;
-          selfFlake = inputs.self;
-        };
       };
 
       devShells.default = pkgs.mkShellNoCC {

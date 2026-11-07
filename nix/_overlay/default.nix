@@ -14,10 +14,6 @@ in
   wat-install = callPackage ./wat-install.nix { };
   wat-install-activation = callPackage ./wat-install-activation.nix { };
   wat-install-helpers = callPackage ./wat-install-helpers { };
-  wat-prebuild = pkgs.writeScriptBin "wat-prebuild" ''
-    ${nix}/bin/nix run .#prebuild-script
-  '';
-  wat-prebuild-script = callPackage ./wat-prebuild-script { };
 
   nix-remote-run = callPackage ./nix-remote-run.nix { };
   nix-with-flakes = callPackage ./nix-with-flakes.nix { };
@@ -40,7 +36,6 @@ in
       wat-deploy
       wat-gather
       wat-install
-      wat-prebuild
     ];
   };
 

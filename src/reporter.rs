@@ -279,8 +279,12 @@ fn output_level(line: &str) -> Level {
             .is_some_and(|count| {
                 !count.is_empty() && count.bytes().all(|byte| byte.is_ascii_digit())
             });
-    let derivation_path = line.starts_with("  /nix/store/")
-        && line.ends_with(".drv")
+    let fetch_heading = line.ends_with(" unpacked):")
+        && (line.starts_with("this path will be fetched (")
+            || line.strip_prefix("these ")
+                .and_then(|rest| rest.split_once(" paths will be fetched ("))
+                .is_some_and(|(count, _)| !count.is_empty() && count.bytes().all(|byte| byte.is_ascii_digit())));
+    let plan_path = line.starts_with("  /nix/store/")
         && !line.trim().contains(char::is_whitespace);
     let copying_path = line.starts_with("copying path '/nix/store/")
         && line.ends_with("'...")
@@ -300,7 +304,8 @@ fn output_level(line: &str) -> Level {
         || art_border
         || art_row
         || derivation_heading
-        || derivation_path
+        || fetch_heading
+        || plan_path
         || copying_path
         || phase_announcement
         || fetching_git_input
@@ -567,8 +572,12 @@ mod tests {
     }
 
     #[test]
-    fn derivation_plan_details_are_debug_output() {
+    fn build_and_fetch_plan_details_are_debug_output() {
         for line in [
+            "this path will be fetched (0.07 MiB download, 0.27 MiB unpacked):",
+            "these 2 paths will be fetched (1.00 MiB download, 2.00 MiB unpacked):",
+            "  /nix/store/pa6rydwgjxxmmvdxap7qk9c85h8jbimy-hello-2.12.3",
+            "  \x1b[35;1m/nix/store/example-package\x1b[0m",
             "these 13 derivations will be built:",
             "this derivation will be built:",
             "these \x1b[35;1m15\x1b[0m derivations will be built:",

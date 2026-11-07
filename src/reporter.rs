@@ -7,7 +7,7 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use log::Level;
 
 use crate::{
-    event::{ArtifactEvent, Event, EventScope, EventStream, HostEvent, PipelineEvent},
+    event::{ArtifactEvent, Event, EventScope, EventStream, HostEvent, PipelineEvent, PipelinePhase},
     palette,
     reducer::{ActivitySnapshot, MachineColumn, PipelineReducer, PipelineSnapshot},
 };
@@ -181,12 +181,18 @@ impl IndicatifReporter {
     }
 
     fn emit_artifact(&self, artifact: &ArtifactEvent) {
-        self.progress.suspend(|| match artifact {
+        match artifact {
             ArtifactEvent::Ready { host, path } => {
-                let _ = host;
-                println!("{}", path.display());
+                self.log(
+                    Level::Info,
+                    &EventScope {
+                        host: Some(host.clone()),
+                        phase: Some(PipelinePhase::Build),
+                    },
+                    &format!("Built: {}", path.display()),
+                );
             }
-        });
+        }
     }
 }
 

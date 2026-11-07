@@ -9,6 +9,7 @@ mod recording;
 mod reducer;
 mod reporter;
 mod results;
+mod text;
 
 use std::{io::Write, path::Path, sync::Once};
 

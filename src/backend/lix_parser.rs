@@ -131,6 +131,25 @@ impl LixEventAdapter {
             return Ok(());
         }
 
+        // Nix retries a busy store database; its nested diagnostic prefixes
+        // make this temporary contention look like a failed build.
+        let plain = crate::text::without_ansi(message);
+        let mut diagnostic = plain.as_ref();
+        while let Some(rest) = diagnostic
+            .strip_prefix("warning: ")
+            .or_else(|| diagnostic.strip_prefix("error: "))
+            .or_else(|| diagnostic.strip_prefix("error (ignored): "))
+        {
+            diagnostic = rest;
+        }
+        let (level, message) = if diagnostic.starts_with("SQLite database '")
+            && diagnostic.ends_with("' is busy")
+        {
+            (Level::Info, diagnostic)
+        } else {
+            (level, message)
+        };
+
         self.events
             .send(Event::Log(LogEvent {
                 level,
@@ -171,6 +190,37 @@ mod tests {
     use crate::event::EventBus;
 
     #[tokio::test]
+    async fn reports_database_contention_as_info_without_diagnostic_prefixes() {
+        let (bus, mut stream) = EventBus::new(16);
+        let mut adapter = LixEventAdapter::new(bus.sender());
+        let diagnostic = "SQLite database '/nix/var/nix/db/db.sqlite' is busy";
+        for prefix in ["", "error: ", "warning: error: ", "error (ignored): error: "] {
+            let message = format!("{prefix}{diagnostic}");
+            adapter.handle_stderr_line(&message).await.unwrap();
+            for level in [0, 1] {
+                adapter.handle_stderr_line(&format!("@nix {}", serde_json::json!({
+                    "action": "msg", "level": level, "msg": message
+                }))).await.unwrap();
+            }
+        }
+        let colored = "\x1b[35;1mwarning:\x1b[0m \x1b[31;1merror:\x1b[0m SQLite database '\x1b[35;1m/nix/var/nix/db/db.sqlite\x1b[0m' is busy";
+        adapter.handle_stderr_line(colored).await.unwrap();
+        adapter.handle_stderr_line(&format!("@nix {}", serde_json::json!({
+            "action": "msg", "level": 0, "msg": colored
+        }))).await.unwrap();
+        drop(adapter);
+        drop(bus);
+        let mut count = 0;
+        while let Some(envelope) = stream.recv().await {
+            let Event::Log(log) = envelope.event else { panic!("expected log") };
+            assert_eq!(log.level, Level::Info);
+            assert_eq!(log.message, diagnostic);
+            count += 1;
+        }
+        assert_eq!(count, 14);
+    }
+
+    #[tokio::test]
     async fn hides_ignored_eval_cache_contention_but_preserves_other_errors() {
         let (bus, mut stream) = EventBus::new(16);
         let mut adapter = LixEventAdapter::new(bus.sender());
@@ -182,8 +232,6 @@ mod tests {
             }))).await.unwrap();
         }
         let visible = [
-            "error: SQLite database '/cache/eval-cache-v5/hash.sqlite' is busy",
-            "error (ignored): error: SQLite database '/nix/var/nix/db/db.sqlite' is busy",
             "error (ignored): error: SQLite database '/cache/eval-cache-v5/hash.sqlite' is corrupt",
             "another diagnostic",
         ];

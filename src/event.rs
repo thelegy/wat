@@ -68,7 +68,7 @@ pub enum PipelinePhase {
 impl PipelinePhase {
     pub fn name(self) -> &'static str {
         match self {
-            Self::Evaluate => "evaluate",
+            Self::Evaluate => "eval",
             Self::Build => "build",
             Self::Upload => "upload",
             Self::Deploy => "deploy",

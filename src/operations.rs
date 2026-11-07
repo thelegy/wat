@@ -82,32 +82,7 @@ async fn run_pipeline(
         .send(Event::Pipeline(PipelineEvent::Started { hosts: hostnames }))
         .await?;
 
-    events
-        .send(Event::Log(LogEvent {
-            level: log::Level::Debug,
-            message: "Evaluating selected hosts".to_string(),
-        }))
-        .await?;
-    emit_phase(&events, PipelinePhase::Evaluate, &plan.hosts, true).await?;
-    events
-        .send(Event::Pipeline(PipelineEvent::PhaseStarted(
-            PipelinePhase::Build,
-        )))
-        .await?;
-    events
-        .send(Event::Log(LogEvent {
-            level: log::Level::Debug,
-            message: "Building selected hosts".to_string(),
-        }))
-        .await?;
-
     let (builds, mut errors) = build_hosts(backend.clone(), &plan.hosts, events.clone(), report).await;
-    events
-        .send(Event::Pipeline(PipelineEvent::PhaseFinished {
-            phase: PipelinePhase::Build,
-            success: errors.is_empty(),
-        }))
-        .await?;
 
     if !(plan.fail_early && !errors.is_empty()) && !builds.is_empty() {
         if let PlanMode::Deploy(activation) = plan.mode {
@@ -135,41 +110,6 @@ async fn run_pipeline(
     } else {
         Err(PipelineFailed(errors.iter().map(|error| format!("{error:#}")).collect::<Vec<_>>().join("\n")).into())
     }
-}
-
-async fn emit_phase(
-    events: &EventSender,
-    phase: PipelinePhase,
-    hosts: &[HostPlan],
-    success: bool,
-) -> Result<()> {
-    events
-        .send(Event::Pipeline(PipelineEvent::PhaseStarted(phase)))
-        .await?;
-
-    for host in hosts {
-        events
-            .send(Event::Host(HostEvent::Started {
-                host: host.hostname.clone(),
-                phase,
-            }))
-            .await?;
-        events
-            .send(Event::Host(HostEvent::Finished {
-                host: host.hostname.clone(),
-                phase,
-                success,
-            }))
-            .await?;
-    }
-
-    events
-        .send(Event::Pipeline(PipelineEvent::PhaseFinished {
-            phase,
-            success,
-        }))
-        .await?;
-    Ok(())
 }
 
 async fn build_hosts(
@@ -203,11 +143,12 @@ async fn build_host(
     let host_name = host.hostname.clone();
     let events = events
         .with_host(host_name.clone())
-        .with_phase(PipelinePhase::Build);
+        .with_phase(PipelinePhase::Evaluate);
+    let mut phase = PipelinePhase::Evaluate;
     events
         .send(Event::Host(HostEvent::Started {
             host: host_name.clone(),
-            phase: PipelinePhase::Build,
+            phase,
         }))
         .await?;
 
@@ -218,9 +159,22 @@ async fn build_host(
             .context("failed to create temporary directory")?;
         let out_link = temp_dir.path().join(&host.out_link_name);
 
+        let derivation = backend
+            .evaluate_installable(&host.installable, events.clone())
+            .await
+            .with_context(|| format!("failed to evaluate {}", host.installable))?;
+        events.send(Event::Host(HostEvent::Finished {
+            host: host_name.clone(), phase, success: true,
+        })).await?;
+        phase = PipelinePhase::Build;
+        let events = events.with_phase(phase);
+        events.send(Event::Host(HostEvent::Started {
+            host: host_name.clone(), phase,
+        })).await?;
+
         backend
             .build_installable(
-                &host.installable,
+                &derivation,
                 &out_link,
                 host.keep_going,
                 events.clone(),
@@ -254,10 +208,10 @@ async fn build_host(
     .await;
 
     if result.is_err() {
-        let _ = events
+        let _ = events.with_phase(phase)
             .send(Event::Host(HostEvent::Finished {
                 host: host_name,
-                phase: PipelinePhase::Build,
+                phase,
                 success: false,
             }))
             .await;

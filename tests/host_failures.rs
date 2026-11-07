@@ -17,9 +17,13 @@ fn healthy_hosts_finish_despite_build_copy_or_activation_failures() {
             // stopping queued hosts, without interrupting a running activation.
             let nix = r#"#!/bin/sh
 case "$3" in
+  eval)
+    case "$*" in *nixosConfigurations.bad.*) printf /nix/store/bad.drv;; *) printf /nix/store/healthy.drv;; esac
+    exit 0
+    ;;
   build)
-    case "$*" in *nixosConfigurations.bad.*) [ "$FAILURE" = build ] && exit 7;; esac
-    case "$*" in *nixosConfigurations.healthy.*) sleep 0.1;; esac
+    case "$*" in */bad.drv*) [ "$FAILURE" = build ] && exit 7;; esac
+    case "$*" in */healthy.drv*) sleep 0.1;; esac
     while [ "$#" -gt 0 ] && [ "$1" != --out-link ]; do shift; done
     [ "$#" -ge 2 ] || exit 10
     ln -s "$STORE" "$2"

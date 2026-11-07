@@ -18,6 +18,8 @@ pub fn detect() -> Arc<dyn Backend + Send + Sync> {
 
 #[async_trait]
 pub trait Backend {
+    async fn evaluate_installable(&self, installable: &str, events: EventSender) -> Result<String>;
+
     async fn build_installable(
         &self,
         installable: &str,

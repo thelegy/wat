@@ -11,7 +11,11 @@ fn reports_preserve_stdout_and_capture_mixed_outcomes() {
     let nix = dir.path().join("nix");
     fs::write(&nix, r#"#!/bin/sh
 if [ "$1" = eval ]; then printf '["good","bad"]'; exit 0; fi
-case "$*" in *nixosConfigurations.bad.*) echo 'evaluation or build failed' >&2; exit 7;; esac
+if [ "$3" = eval ]; then
+  case "$*" in *nixosConfigurations.bad.*) printf /nix/store/bad.drv;; *) printf /nix/store/good.drv;; esac
+  exit 0
+fi
+case "$*" in */bad.drv*) echo 'evaluation or build failed' >&2; exit 7;; esac
 while [ "$#" -gt 0 ] && [ "$1" != --out-link ]; do shift; done
 ln -s "$STORE" "$2"
 "#).unwrap();

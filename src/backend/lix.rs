@@ -33,6 +33,19 @@ impl LixBackend {
 
 #[async_trait]
 impl Backend for LixBackend {
+    async fn evaluate_installable(&self, installable: &str, events: EventSender) -> Result<String> {
+        let mut command = self.command();
+        command.args(["--log-format", "internal-json", "eval", "--raw"]);
+        command.arg(format!("{installable}.drvPath"));
+        let output = execute_command(&mut command, events, true).await?;
+        let path = String::from_utf8(output).context("derivation path contained invalid UTF-8")?;
+        let path = path.trim();
+        if !path.starts_with("/nix/store/") || !path.ends_with(".drv") {
+            bail!("invalid derivation path: {path:?}");
+        }
+        Ok(path.to_string())
+    }
+
     async fn build_installable(
         &self,
         installable: &str,
@@ -45,10 +58,10 @@ impl Backend for LixBackend {
         if keep_going {
             command.arg("--keep-going");
         }
-        command.arg(installable);
+        command.arg(format!("{installable}^*"));
         command.arg("--out-link");
         command.arg(out_link);
-        execute_command(&mut command, events).await
+        execute_command(&mut command, events, false).await.map(|_| ())
     }
 
     async fn copy_closure(
@@ -66,7 +79,7 @@ impl Backend for LixBackend {
         command.arg("--to");
         command.arg(destination);
         command.arg(source);
-        execute_command(&mut command, events).await
+        execute_command(&mut command, events, false).await.map(|_| ())
     }
 
     async fn list_machines(&self) -> Result<Vec<String>> {
@@ -104,7 +117,7 @@ impl Backend for LixBackend {
     }
 }
 
-async fn execute_command(command: &mut Command, events: EventSender) -> Result<()> {
+async fn execute_command(command: &mut Command, events: EventSender, capture_stdout: bool) -> Result<Vec<u8>> {
     let id = crate::recording::start(command);
     let scope = events.scope().clone();
     command.stdout(Stdio::piped());
@@ -118,14 +131,18 @@ async fn execute_command(command: &mut Command, events: EventSender) -> Result<(
         use tokio::io::AsyncReadExt;
         let mut stdout = stdout;
         let mut bytes = [0; 8192];
+        let mut output = Vec::new();
         loop {
             let count = stdout.read(&mut bytes).await?;
             if count == 0 {
                 break;
             }
             crate::recording::raw(&stdout_scope, id, "stdout", &bytes[..count], true);
+            if capture_stdout {
+                output.extend_from_slice(&bytes[..count]);
+            }
         }
-        Ok::<_, std::io::Error>(())
+        Ok::<_, std::io::Error>(output)
     });
     let stderr = child
         .stderr
@@ -159,7 +176,7 @@ async fn execute_command(command: &mut Command, events: EventSender) -> Result<(
         .await
         .with_context(|| "failed to wait for lix")?;
 
-    stdout_task.await??;
+    let output = stdout_task.await??;
     crate::recording::write(
         serde_json::json!({"kind": "exit", "command": id, "success": status.success(), "code": status.code()}),
     );
@@ -172,7 +189,7 @@ async fn execute_command(command: &mut Command, events: EventSender) -> Result<(
     renderer.finish(status.success());
 
     if status.success() {
-        Ok(())
+        Ok(output)
     } else {
         bail!("lix exited with status {status}");
     }

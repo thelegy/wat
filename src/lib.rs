@@ -8,6 +8,7 @@ mod planner;
 mod recording;
 mod reducer;
 mod reporter;
+mod results;
 
 use std::{io::Write, path::Path, sync::Once};
 
@@ -22,9 +23,23 @@ pub async fn run() -> Result<()> {
     if let cli::Command::Replay { path } = &cli.command {
         return recording::replay(path).await;
     }
-    prepare_environment()?;
-    recording::init()?;
-    let result = operations::execute(cli.command).await;
+    let report_path = match &cli.command {
+        cli::Command::Build(args) => args.results_file.clone(),
+        _ => None,
+    };
+    let report = results::Report::default();
+    if let Some(path) = &report_path {
+        report.write(path)?;
+    }
+    let result = async {
+        prepare_environment()?;
+        recording::init()?;
+        operations::execute(cli.command, report.clone()).await
+    }.await;
+    if let Some(path) = &report_path {
+        report.finish(&result);
+        report.write(path)?;
+    }
     recording::write(
         serde_json::json!({"kind": "outcome", "error": result.as_ref().err().map(|error| format!("{error}"))}),
     );

@@ -34,13 +34,23 @@ pub enum Command {
     DryActivate(CommonBuildArgs),
 
     /// Only build the configuration and print store path
-    Build(CommonBuildArgs),
+    Build(BuildArgs),
 
     /// Build ISO image and print store path
     Iso(CommonBuildArgs),
 
     /// Build SD card image and print store path
     Sdcard(CommonBuildArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct BuildArgs {
+    #[command(flatten)]
+    pub common: CommonBuildArgs,
+
+    /// Atomically write a versioned JSON build report to this path
+    #[arg(long)]
+    pub results_file: Option<std::path::PathBuf>,
 }
 
 #[derive(Debug, Args)]
@@ -84,12 +94,12 @@ impl Command {
     pub fn build_args_mut(&mut self) -> Option<&mut CommonBuildArgs> {
         match self {
             Self::Replay { .. } => None,
+            Self::Build(args) => Some(&mut args.common),
             Self::Switch(args)
             | Self::Boot(args)
             | Self::Reboot(args)
             | Self::Test(args)
             | Self::DryActivate(args)
-            | Self::Build(args)
             | Self::Iso(args)
             | Self::Sdcard(args) => Some(args),
         }
@@ -99,6 +109,12 @@ impl Command {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn results_file_is_build_only() {
+        assert!(Cli::try_parse_from(["wat", "build", "--all", "--results-file", "report.json"]).is_ok());
+        assert!(Cli::try_parse_from(["wat", "switch", "host", "--results-file", "report.json"]).is_err());
+    }
 
     #[test]
     fn host_selection_requires_names_or_all_for_every_command() {

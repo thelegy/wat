@@ -71,3 +71,45 @@ behavior, add a `sudo` override for your local host and leave the default as SSH
 The config library also supports `.wat/config.json`, `.yaml`, `.yml`, `.ini`,
 `.ron`, `.json5`, and `.corn`. Use one configuration file. Missing files and
 omitted settings use defaults; malformed files and unknown settings are errors.
+
+### Machine-readable build results
+
+`wat build [HOST ... | --all | -A] --results-file PATH` writes a versioned
+JSON report without changing terminal rendering, logs, or stdout store paths.
+The option is available only for `build`. For example:
+
+```json
+{
+  "version": 1,
+  "status": "complete",
+  "hosts": {
+    "sirrah": { "status": "success" },
+    "y": { "status": "build-failed", "reason": "failed to build ..." }
+  }
+}
+```
+
+Version 1 has a top-level `status` of `complete` or `incomplete` and a `hosts`
+object keyed by hostname, serialized in sorted order. `complete` means every
+selected host reached an outcome, not that every host succeeded. Host statuses
+are `success`, `build-failed`, or `incomplete`. `build-failed` includes evaluation,
+Nix invocation, and output resolution failures; its `reason` contains the error
+chain for human diagnosis and is not a stable machine-readable category.
+An incomplete run includes a top-level `reason` when available. Discovery or
+setup failures can leave `hosts` empty. Consumers must check version, run status,
+and host outcomes; comparison and baseline policy belong to the consumer.
+
+Before setup begins, wat replaces the report with an `incomplete` report, so an
+interrupted run cannot leave a previous successful report in place. On normal
+termination it replaces the report again, including when hosts fail. Unfinished
+hosts remain `incomplete`. Abrupt termination may leave only the initial report;
+parse errors and runtime initialization failures may prevent any report. Consumers
+must reject missing or malformed reports and ensure they read the current run's
+file. No timeout or interruption handler is added.
+
+Writes use a synced temporary file in the destination directory followed by atomic
+replacement. Parent directories must already exist. Report write failures are
+printed to stderr and cause failure exit status. Individual host failures retain
+the existing aggregate failure exit status. Reports contain no timestamps or
+completion-order-dependent fields; error text can include environment-specific
+paths. Report paths should be dedicated output files, separate from inputs and logs.

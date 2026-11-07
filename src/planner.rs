@@ -75,7 +75,7 @@ pub fn plan(command: &CliCommand) -> Result<PipelinePlan> {
         CliCommand::Reboot(args) => deploy_plan(args, ActivationPlan::REBOOT),
         CliCommand::Test(args) => deploy_plan(args, ActivationPlan::TEST),
         CliCommand::DryActivate(args) => deploy_plan(args, ActivationPlan::DRY_ACTIVATE),
-        CliCommand::Build(args) => Ok(build_only_plan(args)),
+        CliCommand::Build(args) => Ok(build_only_plan(&args.common)),
         CliCommand::Iso(args) => Ok(artifact_plan(args, ArtifactKind::Iso)),
         CliCommand::Sdcard(args) => Ok(artifact_plan(args, ArtifactKind::Sdcard)),
     }

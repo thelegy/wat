@@ -21,7 +21,7 @@ use crate::{
     reporter::{IndicatifReporter, Reporter},
 };
 
-pub async fn execute(mut command: CliCommand) -> Result<()> {
+pub async fn execute(mut command: CliCommand, report: crate::results::Report) -> Result<()> {
     let config = crate::config::Config::load(Path::new("."))?;
     let backend = backend::detect();
     if let Some(args) = command.build_args_mut() {
@@ -33,12 +33,13 @@ pub async fn execute(mut command: CliCommand) -> Result<()> {
         }
     }
     let plan = planner::plan(&command)?;
+    report.select(plan.hosts.iter().map(|host| host.hostname.clone()));
     let (bus, events) = EventBus::new(512);
 
     let mut reporter = IndicatifReporter::new();
     let reporter_handle = tokio::spawn(async move { reporter.run(events).await });
 
-    let result = run_pipeline(backend, plan, config, bus.sender()).await;
+    let result = run_pipeline(backend, plan, config, bus.sender(), report).await;
     drop(bus);
 
     let reporter_result = reporter_handle
@@ -54,6 +55,7 @@ async fn run_pipeline(
     plan: PipelinePlan,
     config: crate::config::Config,
     events: EventSender,
+    report: crate::results::Report,
 ) -> Result<()> {
     let hostnames: Vec<String> = plan
         .hosts
@@ -99,7 +101,7 @@ async fn run_pipeline(
         }))
         .await?;
 
-    let (builds, mut errors) = build_hosts(backend.clone(), &plan.hosts, events.clone()).await;
+    let (builds, mut errors) = build_hosts(backend.clone(), &plan.hosts, events.clone(), report).await;
     events
         .send(Event::Pipeline(PipelineEvent::PhaseFinished {
             phase: PipelinePhase::Build,
@@ -174,13 +176,20 @@ async fn build_hosts(
     backend: Arc<dyn Backend + Send + Sync>,
     hosts: &[HostPlan],
     events: EventSender,
+    report: crate::results::Report,
 ) -> (Vec<BuildOutcome>, Vec<anyhow::Error>) {
     let mut tasks = JoinSet::new();
 
     for host in hosts.iter().cloned() {
         let backend = backend.clone();
         let events = events.clone();
-        tasks.spawn(async move { build_host(backend, host, events).await });
+        let report = report.clone();
+        tasks.spawn(async move {
+            let hostname = host.hostname.clone();
+            let result = build_host(backend, host, events).await;
+            report.host_finished(hostname, &result);
+            result
+        });
     }
 
     collect_join_set(tasks).await

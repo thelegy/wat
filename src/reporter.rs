@@ -254,7 +254,10 @@ fn output_level(line: &str) -> Level {
         && (line.contains("' from '") || line.contains("' to '"));
     let phase_announcement = matches!(line, "Evaluating selected hosts" | "Building selected hosts");
     let fetching_git_input = line.starts_with("fetching git input '") && line.ends_with("'");
-    if fingerprint || art_border || art_row || derivation_heading || derivation_path || copying_path || phase_announcement || fetching_git_input {
+    let imported_sops_key = line.strip_prefix("sops-install-secrets: Imported ")
+        .is_some_and(|rest| rest.contains(" as age key with fingerprint ")
+            || rest.contains(" as GPG key with fingerprint "));
+    if fingerprint || art_border || art_row || derivation_heading || derivation_path || copying_path || phase_announcement || fetching_git_input || imported_sops_key {
         Level::Debug
     } else {
         Level::Info
@@ -461,6 +464,17 @@ mod tests {
         fn flush(&self) -> io::Result<()> {
             Ok(())
         }
+    }
+
+    #[test]
+    fn sops_key_imports_are_debug_output() {
+        for line in [
+            "sops-install-secrets: Imported /etc/ssh/ssh_host_ed25519_key as age key with fingerprint age1example",
+            "sops-install-secrets: Imported /etc/ssh/ssh_host_rsa_key as GPG key with fingerprint ab9a4004133c9e02091db7e53b6203a9abeb522d",
+        ] {
+            assert_eq!(output_level(line), Level::Debug, "{line}");
+        }
+        assert_eq!(output_level("sops-install-secrets: failed to import key"), Level::Info);
     }
 
     #[test]

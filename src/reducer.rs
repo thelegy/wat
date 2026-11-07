@@ -101,6 +101,7 @@ pub struct PipelineReducer {
     hosts: BTreeMap<String, HostState>,
     activities: HashMap<u64, ActivityInfo>,
     by_type: HashMap<u64, ActivitiesByType>,
+    summary_types: HashSet<u64>,
     files_linked: u64,
     bytes_linked: u64,
     corrupted_paths: u64,
@@ -113,6 +114,7 @@ impl PipelineReducer {
             hosts: BTreeMap::new(),
             activities: HashMap::new(),
             by_type: HashMap::new(),
+            summary_types: HashSet::new(),
             files_linked: 0,
             bytes_linked: 0,
             corrupted_paths: 0,
@@ -131,29 +133,57 @@ impl PipelineReducer {
     }
 
     pub fn failure_summaries(&self) -> Vec<String> {
-        [PipelinePhase::Evaluate, PipelinePhase::Build, PipelinePhase::Upload,
-         PipelinePhase::Deploy, PipelinePhase::Reboot]
-            .into_iter()
-            .filter_map(|phase| {
-                let mut hosts: Vec<_> = self.hosts.iter().filter(|(_, state)| {
+        [
+            PipelinePhase::Evaluate,
+            PipelinePhase::Build,
+            PipelinePhase::Upload,
+            PipelinePhase::Deploy,
+            PipelinePhase::Reboot,
+        ]
+        .into_iter()
+        .filter_map(|phase| {
+            let mut hosts: Vec<_> = self
+                .hosts
+                .iter()
+                .filter(|(_, state)| {
                     if phase == PipelinePhase::Deploy {
                         state.failed.contains(&PipelinePhase::Activate)
                             || (state.failed.contains(&phase) && state.failed.len() == 1)
                     } else {
                         state.failed.contains(&phase)
                     }
-                }).map(|(host, _)| host.as_str()).collect();
-                hosts.sort_unstable();
-                if hosts.is_empty() { return None; }
-                Some(format!("{} {} failed to {}: {}", hosts.len(),
-                    if hosts.len() == 1 { "machine" } else { "machines" },
-                    phase.name(), hosts.join(", ")))
-            }).collect()
+                })
+                .map(|(host, _)| host.as_str())
+                .collect();
+            hosts.sort_unstable();
+            if hosts.is_empty() {
+                return None;
+            }
+            Some(format!(
+                "{} {} failed to {}: {}",
+                hosts.len(),
+                if hosts.len() == 1 {
+                    "machine"
+                } else {
+                    "machines"
+                },
+                phase.name(),
+                hosts.join(", ")
+            ))
+        })
+        .collect()
     }
 
     pub fn snapshot(&self) -> PipelineSnapshot {
         PipelineSnapshot {
-            summary: format!("Packages: {}", self.status_summary()),
+            summary: {
+                let summary = self.status_summary();
+                if summary.is_empty() {
+                    String::new()
+                } else {
+                    format!("Packages: {summary}")
+                }
+            },
             machines: self.machine_summary(),
             activities: self
                 .activities
@@ -267,6 +297,25 @@ impl PipelineReducer {
                 result_type,
                 fields,
             } => self.handle_result(*id, *result_type, fields),
+        }
+        // Once discovered, keep each counter visible even while provisional
+        // estimates drop to zero between queries. This preserves the row layout.
+        for kind in [
+            ACT_BUILDS,
+            ACT_COPY_PATHS,
+            ACT_COPY_PATH,
+            ACT_FILE_TRANSFER,
+            ACT_OPTIMISE_STORE,
+            ACT_VERIFY_PATHS,
+        ] {
+            let aggregate = self.aggregate(kind);
+            if aggregate.done > 0
+                || aggregate.expected > 0
+                || aggregate.running > 0
+                || aggregate.failed > 0
+            {
+                self.summary_types.insert(kind);
+            }
         }
     }
 
@@ -573,28 +622,15 @@ impl PipelineReducer {
             && aggregate.done == 0
             && aggregate.expected == 0
             && aggregate.failed == 0
+            && !self.summary_types.contains(&kind)
         {
             return None;
         }
 
-        let mut rendered = if aggregate.running > 0 {
-            if aggregate.expected > 0 {
-                format!(
-                    "{}/{}/{} {}",
-                    aggregate.running, aggregate.done, aggregate.expected, label
-                )
-            } else {
-                format!("{}/{} {}", aggregate.running, aggregate.done, label)
-            }
-        } else if aggregate.expected != aggregate.done {
-            if aggregate.expected > 0 {
-                format!("{}/{} {}", aggregate.done, aggregate.expected, label)
-            } else {
-                format!("{} {}", aggregate.done, label)
-            }
-        } else {
-            format!("{} {}", aggregate.done, label)
-        };
+        let mut rendered = format!(
+            "{}/{}/{} {}",
+            aggregate.running, aggregate.done, aggregate.expected, label
+        );
 
         if aggregate.failed > 0 {
             rendered.push_str(&format!(" ({} failed)", aggregate.failed));
@@ -609,38 +645,19 @@ impl PipelineReducer {
             && aggregate.done == 0
             && aggregate.expected == 0
             && aggregate.failed == 0
+            && !self.summary_types.contains(&kind)
         {
             return None;
         }
 
-        let mut rendered = if aggregate.running > 0 {
-            if aggregate.expected > 0 {
-                format!(
-                    "{:.1}/{:.1}/{:.1} {}",
-                    aggregate.running as f64 / MIB,
-                    aggregate.done as f64 / MIB,
-                    aggregate.expected as f64 / MIB,
-                    label
-                )
-            } else {
-                format!(
-                    "{:.1}/{:.1} {}",
-                    aggregate.running as f64 / MIB,
-                    aggregate.done as f64 / MIB,
-                    label
-                )
-            }
-        } else if aggregate.expected != aggregate.done {
-            if aggregate.expected > 0 {
-                format!(
-                    "{:.1}/{:.1} {}",
-                    aggregate.done as f64 / MIB,
-                    aggregate.expected as f64 / MIB,
-                    label
-                )
-            } else {
-                format!("{:.1} {}", aggregate.done as f64 / MIB, label)
-            }
+        // File transfer progress reports running operations, not running bytes.
+        let mut rendered = if aggregate.expected > 0 {
+            format!(
+                "{:.1}/{:.1} {}",
+                aggregate.done as f64 / MIB,
+                aggregate.expected as f64 / MIB,
+                label
+            )
         } else {
             format!("{:.1} {}", aggregate.done as f64 / MIB, label)
         };
@@ -723,6 +740,64 @@ fn store_path_to_name(path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn discovered_counters_remain_visible_between_queries() {
+        let mut reducer = PipelineReducer::new();
+        assert!(reducer.snapshot().summary.is_empty());
+        reducer.apply_lix(
+            &None,
+            &LixEvent::Start {
+                id: 1,
+                kind: ACT_BUILDS,
+                parent: 0,
+                level: 0,
+                text: String::new(),
+                fields: vec![],
+            },
+        );
+        assert!(reducer.snapshot().summary.is_empty());
+        reducer.apply_lix(
+            &None,
+            &LixEvent::Result {
+                id: 1,
+                result_type: RES_PROGRESS,
+                fields: vec![
+                    LixField::Int(0),
+                    LixField::Int(12),
+                    LixField::Int(0),
+                    LixField::Int(0),
+                ],
+            },
+        );
+        assert_eq!(reducer.snapshot().summary, "Packages: 0/0/12 built");
+        reducer.apply_lix(&None, &LixEvent::Stop { id: 1 });
+        assert_eq!(reducer.snapshot().summary, "Packages: 0/0/0 built");
+    }
+
+    #[test]
+    fn build_counts_keep_running_done_total_format_during_discovery() {
+        let mut reducer = PipelineReducer::new();
+        reducer.handle_start(1, ACT_BUILDS, 0, 0, "", &[], None);
+        let progress = |done, expected, running| {
+            vec![
+                LixField::Int(done),
+                LixField::Int(expected),
+                LixField::Int(running),
+                LixField::Int(0),
+            ]
+        };
+        reducer.handle_result(1, RES_PROGRESS, &progress(0, 12, 0));
+        assert_eq!(reducer.status_summary(), "0/0/12 built");
+        reducer.handle_result(1, RES_PROGRESS, &progress(0, 8, 0));
+        assert_eq!(reducer.status_summary(), "0/0/8 built");
+        reducer.handle_result(1, RES_PROGRESS, &progress(0, 12, 2));
+        assert_eq!(reducer.status_summary(), "2/0/12 built");
+        reducer.handle_result(1, RES_PROGRESS, &progress(3, 12, 0));
+        assert_eq!(reducer.status_summary(), "0/3/12 built");
+        reducer.handle_stop(1);
+        assert_eq!(reducer.status_summary(), "0/3/3 built");
+    }
 
     #[test]
     fn machine_counts_move_between_planned_stages() {

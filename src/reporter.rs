@@ -7,7 +7,9 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use log::Level;
 
 use crate::{
-    event::{ArtifactEvent, Event, EventScope, EventStream, HostEvent, PipelineEvent, PipelinePhase},
+    event::{
+        ArtifactEvent, Event, EventScope, EventStream, HostEvent, PipelineEvent, PipelinePhase,
+    },
     palette,
     reducer::{ActivitySnapshot, MachineColumn, PipelineReducer, PipelineSnapshot},
 };
@@ -32,7 +34,7 @@ pub struct IndicatifReporter {
 impl IndicatifReporter {
     pub fn new() -> Self {
         let progress = MultiProgress::new();
-        let summary_bar = progress.add(ProgressBar::new_spinner());
+        let summary_bar = ProgressBar::new_spinner();
         summary_bar.set_style(summary_style());
         let machine_bar = progress.add(ProgressBar::new_spinner());
         machine_bar.set_style(summary_style());
@@ -101,6 +103,13 @@ impl IndicatifReporter {
 
     fn render_summary(&mut self, summary: &str) {
         if summary != self.last_summary {
+            if summary.is_empty() {
+                self.summary_bar.finish_and_clear();
+                self.progress.remove(&self.summary_bar);
+            } else if self.last_summary.is_empty() {
+                self.summary_bar.reset();
+                self.progress.insert_before(&self.machine_bar, self.summary_bar.clone());
+            }
             self.summary_bar.set_message(summary.to_string());
             self.last_summary = summary.to_string();
         }
@@ -117,9 +126,7 @@ impl IndicatifReporter {
         for activity in visible {
             seen.insert(activity.id, ());
             let bar = self.activity_bars.entry(activity.id).or_insert_with(|| {
-                let bar = self
-                    .progress
-                    .insert_before(&self.summary_bar, ProgressBar::new_spinner());
+                let bar = self.progress.add(ProgressBar::new_spinner());
                 bar.set_style(activity_style());
                 bar.enable_steady_tick(std::time::Duration::from_millis(120));
                 bar
@@ -172,12 +179,24 @@ impl IndicatifReporter {
             None => " ".repeat(8),
         };
         let target = format!("{host} {stage}");
-        self.progress.suspend(|| {
-            for line in message.lines() {
-                let level = if level == Level::Info { output_level(line) } else { level };
-                log::log!(target: &target, level, "{line}");
-            }
-        });
+        let lines: Vec<_> = message
+            .lines()
+            .filter_map(|line| {
+                let level = if level == Level::Info {
+                    output_level(line)
+                } else {
+                    level
+                };
+                log::log_enabled!(target: &target, level).then_some((level, line))
+            })
+            .collect();
+        if !lines.is_empty() {
+            self.progress.suspend(|| {
+                for (level, line) in lines {
+                    log::log!(target: &target, level, "{line}");
+                }
+            });
+        }
     }
 
     fn emit_artifact(&self, artifact: &ArtifactEvent) {
@@ -231,11 +250,9 @@ impl Reporter for IndicatifReporter {
                 Event::Host(HostEvent::Finished { .. }) => {}
                 _ => {}
             });
-
-            let snapshot = self.reducer.snapshot();
-            self.render(snapshot);
         }
 
+        self.render(self.reducer.snapshot());
         self.finish(&mut std::io::stderr())
     }
 }
@@ -245,25 +262,50 @@ fn output_level(line: &str) -> Level {
     let line = plain.as_ref();
     let fingerprint = line.starts_with("Host key fingerprint is: ");
     let art_border = line.len() == 19
-        && line.starts_with('+') && line.ends_with('+')
-        && line.contains('[') && line.contains(']');
-    let art_row = line.len() == 19 && line.starts_with('|') && line.ends_with('|')
-        && line[1..18].bytes().all(|byte| b" .o+=*BOX@%&#/^SE".contains(&byte));
+        && line.starts_with('+')
+        && line.ends_with('+')
+        && line.contains('[')
+        && line.contains(']');
+    let art_row = line.len() == 19
+        && line.starts_with('|')
+        && line.ends_with('|')
+        && line[1..18]
+            .bytes()
+            .all(|byte| b" .o+=*BOX@%&#/^SE".contains(&byte));
     let derivation_heading = line == "this derivation will be built:"
-        || line.strip_prefix("these ")
+        || line
+            .strip_prefix("these ")
             .and_then(|rest| rest.strip_suffix(" derivations will be built:"))
-            .is_some_and(|count| !count.is_empty() && count.bytes().all(|byte| byte.is_ascii_digit()));
+            .is_some_and(|count| {
+                !count.is_empty() && count.bytes().all(|byte| byte.is_ascii_digit())
+            });
     let derivation_path = line.starts_with("  /nix/store/")
-        && line.ends_with(".drv") && !line.trim().contains(char::is_whitespace);
+        && line.ends_with(".drv")
+        && !line.trim().contains(char::is_whitespace);
     let copying_path = line.starts_with("copying path '/nix/store/")
         && line.ends_with("'...")
         && (line.contains("' from '") || line.contains("' to '"));
-    let phase_announcement = matches!(line, "Evaluating selected hosts" | "Building selected hosts");
+    let phase_announcement = matches!(
+        line,
+        "Evaluating selected hosts" | "Building selected hosts"
+    );
     let fetching_git_input = line.starts_with("fetching git input '") && line.ends_with("'");
-    let imported_sops_key = line.strip_prefix("sops-install-secrets: Imported ")
-        .is_some_and(|rest| rest.contains(" as age key with fingerprint ")
-            || rest.contains(" as GPG key with fingerprint "));
-    if fingerprint || art_border || art_row || derivation_heading || derivation_path || copying_path || phase_announcement || fetching_git_input || imported_sops_key {
+    let imported_sops_key = line
+        .strip_prefix("sops-install-secrets: Imported ")
+        .is_some_and(|rest| {
+            rest.contains(" as age key with fingerprint ")
+                || rest.contains(" as GPG key with fingerprint ")
+        });
+    if fingerprint
+        || art_border
+        || art_row
+        || derivation_heading
+        || derivation_path
+        || copying_path
+        || phase_announcement
+        || fetching_git_input
+        || imported_sops_key
+    {
         Level::Debug
     } else {
         Level::Info
@@ -480,7 +522,10 @@ mod tests {
         ] {
             assert_eq!(output_level(line), Level::Debug, "{line}");
         }
-        assert_eq!(output_level("sops-install-secrets: failed to import key"), Level::Info);
+        assert_eq!(
+            output_level("sops-install-secrets: failed to import key"),
+            Level::Info
+        );
     }
 
     #[test]
@@ -491,7 +536,10 @@ mod tests {
         ] {
             assert_eq!(output_level(line), Level::Debug, "{line}");
         }
-        assert_eq!(output_level("error: fetching git input failed"), Level::Info);
+        assert_eq!(
+            output_level("error: fetching git input failed"),
+            Level::Info
+        );
     }
 
     #[test]
@@ -510,23 +558,31 @@ mod tests {
         ] {
             assert_eq!(output_level(line), Level::Debug, "{line}");
         }
-        for line in ["error: copying path '/nix/store/example' failed",
-            "copying path '/nix/store/example' from 'https://cache.nixos.org': connection failed"] {
+        for line in [
+            "error: copying path '/nix/store/example' failed",
+            "copying path '/nix/store/example' from 'https://cache.nixos.org': connection failed",
+        ] {
             assert_eq!(output_level(line), Level::Info, "{line}");
         }
     }
 
     #[test]
     fn derivation_plan_details_are_debug_output() {
-        for line in ["these 13 derivations will be built:", "this derivation will be built:",
+        for line in [
+            "these 13 derivations will be built:",
+            "this derivation will be built:",
             "these \x1b[35;1m15\x1b[0m derivations will be built:",
             "these \x1b[35;1m13\x1b[0m derivations will be built:",
             "  \x1b[35;1m/nix/store/example.drv\x1b[0m",
-            "  /nix/store/nnvbgzc0cnv6ypiap2rnww9hpmkp06a8-system-path.drv"] {
+            "  /nix/store/nnvbgzc0cnv6ypiap2rnww9hpmkp06a8-system-path.drv",
+        ] {
             assert_eq!(output_level(line), Level::Debug, "{line}");
         }
-        for line in ["error: failed to build /nix/store/example.drv",
-            "building '/nix/store/example.drv'...", "  /nix/store/example.drv failed"] {
+        for line in [
+            "error: failed to build /nix/store/example.drv",
+            "building '/nix/store/example.drv'...",
+            "  /nix/store/example.drv failed",
+        ] {
             assert_eq!(output_level(line), Level::Info, "{line}");
         }
     }
@@ -542,8 +598,12 @@ mod tests {
         ] {
             assert_eq!(output_level(line), Level::Debug, "{line}");
         }
-        for line in ["activating the configuration...", "Host key verification failed.",
-            "WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!", "| service status  |"] {
+        for line in [
+            "activating the configuration...",
+            "Host key verification failed.",
+            "WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!",
+            "| service status  |",
+        ] {
             assert_eq!(output_level(line), Level::Info, "{line}");
         }
     }
@@ -551,12 +611,23 @@ mod tests {
     #[test]
     fn failures_are_grouped_before_final_status_without_duplicate_deploy_failures() {
         let mut reporter = IndicatifReporter::new();
-        reporter.progress.set_draw_target(ProgressDrawTarget::hidden());
-        for (host, phase) in [("zeta", PipelinePhase::Build), ("alpha", PipelinePhase::Build),
-            ("beta", PipelinePhase::Activate), ("beta", PipelinePhase::Deploy)] {
+        reporter
+            .progress
+            .set_draw_target(ProgressDrawTarget::hidden());
+        for (host, phase) in [
+            ("zeta", PipelinePhase::Build),
+            ("alpha", PipelinePhase::Build),
+            ("beta", PipelinePhase::Activate),
+            ("beta", PipelinePhase::Deploy),
+        ] {
             reporter.reducer.apply(&EventEnvelope {
-                log_time: None, scope: Default::default(),
-                event: Event::Host(HostEvent::Finished { host: host.into(), phase, success: false }),
+                log_time: None,
+                scope: Default::default(),
+                event: Event::Host(HostEvent::Finished {
+                    host: host.into(),
+                    phase,
+                    success: false,
+                }),
             });
         }
         let mut output = Vec::new();

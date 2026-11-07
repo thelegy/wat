@@ -61,7 +61,7 @@ fn failed_evaluation_replays_raw_input_without_executing_commands() {
     assert!(!replay.status.success());
     let stderr = String::from_utf8_lossy(&replay.stderr);
     assert!(stderr.contains("raw diagnostic"), "{stderr}");
-    assert!(stderr.contains("1 machine failed to evaluate: example"), "{stderr}");
+    assert!(stderr.contains("1 machine failed to eval: example"), "{stderr}");
     assert!(!stderr.contains("exited with status"), "{stderr}");
     assert!(!stderr.contains("Recording:"), "{stderr}");
     assert!(!String::from_utf8_lossy(&replay.stdout).contains("captured stdout"));

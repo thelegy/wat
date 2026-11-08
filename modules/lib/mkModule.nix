@@ -1,4 +1,9 @@
-{ config, lib, ... }:
+{
+  config,
+  lib,
+  withSystem,
+  ...
+}:
 let
   settings = config.wat;
 
@@ -40,12 +45,35 @@ let
       path = namespacePath namespace;
       location = "wat.mkModule ${lib.showAttrPath path}";
       argumentNames =
-        if lib.isFunction module then builtins.removeAttrs (lib.functionArgs module) [ "cfg" ] else { };
+        if lib.isFunction module then
+          builtins.removeAttrs (lib.functionArgs module) [
+            "cfg"
+            "inputs'"
+            "self'"
+          ]
+        else
+          { };
       wrapped =
         args:
         let
           cfg = fromNamespace namespace args.config;
-          body = if lib.isFunction module then module (args // { inherit cfg; }) else module;
+          primed = withSystem args.pkgs.stdenv.hostPlatform.system (
+            { inputs', self', ... }:
+            {
+              inherit inputs' self';
+            }
+          );
+          body =
+            if lib.isFunction module then
+              module (
+                args
+                // {
+                  inherit cfg;
+                  inherit (primed) inputs' self';
+                }
+              )
+            else
+              module;
           explicit = body ? options || body ? config;
           metadata = [
             "_class"
@@ -83,7 +111,13 @@ let
             config = gateModuleConfig cfg.enable (path ++ [ "enable" ]) contents;
           };
     in
-    lib.setFunctionArgs wrapped (argumentNames // { config = false; });
+    lib.setFunctionArgs wrapped (
+      argumentNames
+      // {
+        config = false;
+        pkgs = false;
+      }
+    );
 
   # Retain the legacy wrapper's extra import level during migrations.
   mkModuleWrapped = namespace: module: {

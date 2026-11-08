@@ -25,6 +25,12 @@ the configuration at the effective namespace. `config` still means the entire
 destination configuration. `cfg` is local to this function, not an argument
 installed globally or passed to imported modules.
 
+Functions also receive flake-parts' `inputs'` and `self'`, resolved through
+`withSystem` for the destination's `pkgs.stdenv.hostPlatform.system`. These
+values include the flake's configured per-system input projections. They are
+resolved lazily, so modules that do not use them need neither `pkgs` nor
+`withSystem`. Like `cfg`, these arguments are local to the wrapped function.
+
 The effective namespace is `wat.namespacePrefix ++ wat.namespace ++ namespace`.
 Options are automatically placed there, including an `enable` option defaulting
 to false. Configuration is applied only when enabled. Disabled configuration may

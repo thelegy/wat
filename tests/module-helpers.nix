@@ -2,6 +2,12 @@
 { lib }:
 let
   framework = lib.evalModules {
+    specialArgs.withSystem =
+      system: f:
+      f {
+        inputs'.example.value = if system == "aarch64-linux" then 40 else 10;
+        self'.value = 2;
+      };
     modules = [
       ../modules/options.nix
       ../modules/lib/mkModule.nix
@@ -125,6 +131,36 @@ let
           ))
         ]).config.result;
       expected = 42;
+    };
+    testPrimedArguments = {
+      expr =
+        map
+          (
+            class:
+            (evaluate class true [
+              { _module.args.pkgs.stdenv.hostPlatform.system = "aarch64-linux"; }
+              (wat.mkModule [ "feature" ] (
+                {
+                  inputs',
+                  self',
+                  cfg,
+                  ...
+                }:
+                {
+                  options.amount = lib.mkOption { default = inputs'.example.value; };
+                  config.result = cfg.amount + self'.value;
+                }
+              ))
+            ]).config.result
+          )
+          [
+            "nixos"
+            "homeManager"
+          ];
+      expected = [
+        42
+        42
+      ];
     };
     testLegacyWrapper = {
       expr =

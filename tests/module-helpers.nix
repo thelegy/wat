@@ -46,7 +46,7 @@ let
       ...
     }:
     {
-      options.amount = lib.mkOption {
+      namespaceOptions.amount = lib.mkOption {
         type = lib.types.int;
         default = token;
       };
@@ -73,6 +73,66 @@ let
   };
   throws = value: !(builtins.tryEval (builtins.deepSeq value true)).success;
   tests = lib.runTests {
+    testAbsoluteAndNamespaceOptions = {
+      expr =
+        map
+          (
+            helper:
+            map
+              (
+                enabled:
+                let
+                  evaluated = evaluate "nixos" enabled [
+                    (helper [ "feature" ] (
+                      { cfg, config, ... }:
+                      {
+                        options.shared.amount = lib.mkOption {
+                          type = lib.types.int;
+                          default = 3;
+                        };
+                        options.wat.repo.feature.extra = lib.mkOption { default = 5; };
+                        namespaceOptions.amount = lib.mkOption { default = 7; };
+                        config.result = config.shared.amount + cfg.amount + cfg.extra;
+                      }
+                    ))
+                  ];
+                in
+                {
+                  inherit (evaluated.config) result shared;
+                  inherit (evaluated.config.wat.repo.feature) amount extra;
+                  elevatedShared = evaluated.options.wat.repo.feature ? shared;
+                }
+              )
+              [
+                true
+                false
+              ]
+          )
+          [
+            wat.mkModule
+            wat.mkModuleWrapped
+          ];
+      expected =
+        let
+          enabled = {
+            result = 15;
+            shared.amount = 3;
+            amount = 7;
+            extra = 5;
+            elevatedShared = false;
+          };
+        in
+        [
+          [
+            enabled
+            (enabled // { result = 0; })
+          ]
+          [
+            enabled
+            (enabled // { result = 0; })
+          ]
+        ];
+    };
     testWrappedPreservesLegacyOrdering = {
       expr = ordered (wat.mkModuleWrapped [ "feature" ] migratedOrderingModule);
       expected = ordered legacyOrderingModule;
@@ -88,7 +148,7 @@ let
           (wat.mkModuleWrapped [ "feature" ] (
             { answer, cfg, ... }:
             {
-              options.amount = lib.mkOption { default = answer; };
+              namespaceOptions.amount = lib.mkOption { default = answer; };
               config.result = cfg.amount;
             }
           ))
@@ -172,7 +232,7 @@ let
                   ...
                 }:
                 {
-                  options.amount = lib.mkOption { default = inputs'.example.value; };
+                  namespaceOptions.amount = lib.mkOption { default = inputs'.example.value; };
                   config.result = cfg.amount + self'.value;
                 }
               ))
@@ -317,7 +377,7 @@ let
       expr =
         (evaluate "nixos" true [
           (wat.mkModule [ "feature" ] {
-            options.amount = lib.mkOption {
+            namespaceOptions.amount = lib.mkOption {
               type = lib.types.int;
               default = 0;
             };
@@ -333,7 +393,7 @@ let
           (wat.mkModule [ "other" ] (
             { cfg, ... }:
             {
-              options.amount = lib.mkOption { default = 99; };
+              namespaceOptions.amount = lib.mkOption { default = 99; };
               config.otherResult = cfg.amount;
             }
           ))

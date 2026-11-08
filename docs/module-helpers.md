@@ -9,7 +9,7 @@ modules can then request the configured helper library as the `wat` argument:
   flake.modules.nixos.terminal = wat.mkModule [ "desktop" "terminal" ] (
     { cfg, pkgs, ... }:
     {
-      options.package = lib.mkOption {
+      namespaceOptions.package = lib.mkOption {
         type = lib.types.package;
         default = pkgs.foot;
       };
@@ -32,19 +32,22 @@ resolved lazily, so modules that do not use them need neither `pkgs` nor
 `withSystem`. Like `cfg`, these arguments are local to the wrapped function.
 
 The effective namespace is `wat.namespacePrefix ++ wat.namespace ++ namespace`.
-Options are automatically placed there, including an `enable` option defaulting
-to false. Configuration is applied only when enabled. Disabled configuration may
+`namespaceOptions` are automatically placed there, including an `enable` option
+defaulting to false. `options` declares options at their ordinary, absolute paths.
+Both sets of declarations are merged and remain available when the module is disabled.
+Existing callers using `options` for namespaced declarations should rename it to
+`namespaceOptions`. Configuration is applied only when enabled. Disabled configuration may
 reference unavailable options beneath an existing top-level option namespace
 (such as `programs`). As with the old wrapper, entirely unknown top-level
 namespaces still cause an evaluation error. A wrapped module may
 not set its own `enable`, even to false; set it from another module instead.
 
-As with ordinary Nix modules, an attribute set without `options` or `config` is
+As with ordinary Nix modules, an attribute set without `options`, `namespaceOptions`, or `config` is
 configuration shorthand. `disabledModules`, `_class`, `_file`, and
 `key` are module metadata and are preserved. `imports` (including the legacy
 `require` spelling) is rejected: compose modules outside `wat.mkModule`, where
 their activation behavior is explicit. With explicit
-`options` or `config`, other configuration attributes must go inside `config`.
+`options`, `namespaceOptions`, or `config`, other configuration attributes must go inside `config`.
 Use an ordinary module for module forms outside this API.
 
 The same helper works under `flake.modules.nixos`, `flake.modules.homeManager`,

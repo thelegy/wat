@@ -74,7 +74,7 @@ let
               )
             else
               module;
-          explicit = body ? options || body ? config;
+          explicit = body ? options || body ? namespaceOptions || body ? config;
           metadata = [
             "_class"
             "_file"
@@ -85,13 +85,14 @@ let
             metadata
             ++ [
               "options"
+              "namespaceOptions"
               "config"
             ]
           );
           contents =
             if explicit then
               if unsupported != { } then
-                throw "${location}: move configuration attributes into config when using options or config"
+                throw "${location}: move configuration attributes into config when using options, namespaceOptions, or config"
               else
                 body.config or { }
             else
@@ -103,9 +104,11 @@ let
           builtins.intersectAttrs (lib.genAttrs metadata (_: null)) body
           // {
             _file = body._file or location;
-            options = toNamespace namespace (
-              lib.recursiveUpdate { enable = lib.mkEnableOption "the ${lib.showAttrPath path} config layer"; } (
-                body.options or { }
+            options = lib.recursiveUpdate (body.options or { }) (
+              toNamespace namespace (
+                lib.recursiveUpdate { enable = lib.mkEnableOption "the ${lib.showAttrPath path} config layer"; } (
+                  body.namespaceOptions or { }
+                )
               )
             );
             config = gateModuleConfig cfg.enable (path ++ [ "enable" ]) contents;

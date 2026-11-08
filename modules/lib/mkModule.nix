@@ -84,6 +84,12 @@ let
           };
     in
     lib.setFunctionArgs wrapped (argumentNames // { config = false; });
+
+  # Retain the legacy wrapper's extra import level during migrations.
+  mkModuleWrapped = namespace: module: {
+    _file = "wat.mkModuleWrapped ${lib.showAttrPath (namespacePath namespace)}";
+    imports = [ (mkModule namespace module) ];
+  };
 in
 {
   wat.lib = {
@@ -92,6 +98,7 @@ in
       toNamespace
       fromNamespace
       mkModule
+      mkModuleWrapped
       ;
   };
   wat.build = { inherit gateModuleConfig; };

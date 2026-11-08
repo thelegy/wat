@@ -60,3 +60,20 @@ reuse the same namespace with `mkModule` and `toNamespace`.
 The helpers also remain accessible as `config.wat.lib`. The old file-discovery
 wrapper retains its existing API, including explicitly lifted options and the
 `mkTrivialModule` helper, for existing consumers.
+
+For migrations from the file-discovery wrapper, use
+`wat.mkModuleWrapped namespace module`. It accepts the same arguments as
+`mkModule`, but adds the legacy wrapper's extra `imports` level so that module
+ordering is preserved. For example:
+
+```nix
+wat.mkModuleWrapped [ "terminal" ] {
+  config.environment.systemPackages = [ pkgs.foot ];
+}
+```
+
+Keep the module's position in the surrounding imports unchanged and verify
+machine output hashes during migration. Once migrated, switch
+`mkModuleWrapped` to `mkModule` in a separate change so any ordering and hash
+changes are easy to review. The helper preserves import depth; changes to the
+module contents or surrounding composition can still affect hashes.

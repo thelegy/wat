@@ -45,8 +45,70 @@ let
       config.result = cfg.amount + (if config.wat.repo.feature.enable then 1 else 0);
     }
   );
+  legacyOrderingModule =
+    (framework.config.wat.build.wrapModule {
+      path = ./fixtures/legacy-ordering-module.nix;
+      name = "feature";
+    }).value;
+  ordered =
+    module:
+    (evaluate "nixos" true [
+      {
+        options.ordered = lib.mkOption { type = lib.types.listOf lib.types.str; };
+        config.ordered = [ "before" ];
+      }
+      module
+      { ordered = [ "after" ]; }
+    ]).config.ordered;
+  migratedOrderingModule = {
+    ordered = [ "migrated" ];
+  };
   throws = value: !(builtins.tryEval (builtins.deepSeq value true)).success;
   tests = lib.runTests {
+    testWrappedPreservesLegacyOrdering = {
+      expr = ordered (wat.mkModuleWrapped [ "feature" ] migratedOrderingModule);
+      expected = ordered legacyOrderingModule;
+    };
+    testDirectModuleChangesOrdering = {
+      expr = ordered (wat.mkModule [ "feature" ] migratedOrderingModule) != ordered legacyOrderingModule;
+      expected = true;
+    };
+    testWrappedModuleArguments = {
+      expr =
+        (evaluate "nixos" true [
+          { _module.args.answer = 42; }
+          (wat.mkModuleWrapped [ "feature" ] (
+            { answer, cfg, ... }:
+            {
+              options.amount = lib.mkOption { default = answer; };
+              config.result = cfg.amount;
+            }
+          ))
+        ]).config.result;
+      expected = 42;
+    };
+    testWrappedLocation = {
+      expr = (wat.mkModuleWrapped [ "feature" ] { })._file;
+      expected = "wat.mkModuleWrapped wat.repo.feature";
+    };
+    testWrappedDefinitionLocation = {
+      expr =
+        map (definition: definition.file)
+          (evaluate "nixos" true [
+            (wat.mkModuleWrapped [ "feature" ] {
+              _file = "migrated-module.nix";
+              result = 4;
+            })
+          ]).options.result.definitionsWithLocations;
+      expected = [ "migrated-module.nix" ];
+    };
+    testWrappedDisabled = {
+      expr =
+        (evaluate "nixos" false [
+          (wat.mkModuleWrapped [ "feature" ] { result = 4; })
+        ]).config.result;
+      expected = 0;
+    };
     testDisabledByDefault = {
       expr = (evaluate "nixos" null [ full ]).config.wat.repo.feature.enable;
       expected = false;

@@ -2,6 +2,7 @@
 { lib }:
 let
   framework = lib.evalModules {
+    specialArgs.inputs.example.value = 31;
     specialArgs.withSystem =
       system: f:
       f {
@@ -12,6 +13,7 @@ let
       ../modules/options.nix
       ../modules/lib/mkModule.nix
       ../modules/lib/wrapModule.nix
+      ../modules/lib/findModules.nix
       { wat.namespace = [ "repo" ]; }
     ];
   };
@@ -118,6 +120,29 @@ let
     testDisabledByDefault = {
       expr = (evaluate "nixos" null [ full ]).config.wat.repo.feature.enable;
       expected = false;
+    };
+    testDiscoveredModuleInputs = {
+      expr =
+        (evaluate "nixos" null [
+          (wat.findModules ./fixtures/discovered-modules).feature
+        ]).config.result;
+      expected = 31;
+    };
+    testInputsStayLocal = {
+      expr =
+        (evaluate "nixos" null [
+          (args: { result = if args ? inputs || args ? flakes then 1 else 0; })
+        ]).config.result;
+      expected = 0;
+    };
+    testMkModuleDoesNotInjectInputs = {
+      expr =
+        (evaluate "nixos" true [
+          (wat.mkModule [ "feature" ] (args: {
+            result = if args ? inputs || args ? flakes then 1 else 0;
+          }))
+        ]).config.result;
+      expected = 0;
     };
     testModuleArguments = {
       expr =

@@ -6,7 +6,6 @@
 }:
 let
   cfg = config.wat;
-  flakes = inputs;
 
   wat.lib.findMachines =
     dir:
@@ -21,7 +20,7 @@ let
         let
           path = dir + "/${name}";
           machineArgs = {
-            inherit flakes;
+            inherit inputs;
             mkMachine = cfg.lib.mkMachine { inherit name path; };
           };
         in

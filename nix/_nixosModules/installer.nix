@@ -1,4 +1,4 @@
-flakes:
+inputs:
 {
   wat-installer-lib,
   config,
@@ -19,7 +19,7 @@ let
     types
     ;
 
-  dependencyDagOfSubmodule = flakes.dependencyDagOfSubmodule.lib lib;
+  dependencyDagOfSubmodule = inputs.dependencyDagOfSubmodule.lib lib;
 
 in
 {
@@ -289,7 +289,7 @@ in
           localPkgs = import pkgs.path {
             inherit system;
             overlays =
-              (lib.toList (flakes.self.overlay or [ ])) ++ (lib.toList (flakes.self.overlays.default or [ ]));
+              (lib.toList (inputs.self.overlay or [ ])) ++ (lib.toList (inputs.self.overlays.default or [ ]));
           };
           fragments = dependencyDagOfSubmodule.toOrderedList cfg.installer.launcher.fragments;
         in

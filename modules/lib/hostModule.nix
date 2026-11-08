@@ -6,7 +6,6 @@
 }:
 let
   cfg = config.wat;
-  flakes = inputs;
 
   extraOverlays =
     cfg.loadOverlays
@@ -29,7 +28,14 @@ let
 
   extraModules =
     cfg.loadModules
-    ++ (lib.optionals (!cfg.dontLoadWatModules) (lib.attrValues inputs.wat.nixosModules))
+    ++ (lib.optionals (!cfg.dontLoadWatModules) (
+      lib.attrValues (
+        inputs.wat.nixosModules
+        // {
+          wat-machine-files = import ../../nix/_nixosModules/machine-files.nix inputs;
+        }
+      )
+    ))
     ++ (lib.optionals (!cfg.dontLoadWatModules) [ repoUuidModule ])
     ++ (lib.optionals (!cfg.dontLoadFlakeModules) (lib.attrValues (inputs.self.nixosModules or { })));
 
@@ -37,10 +43,6 @@ let
     imports = extraModules;
 
     nixpkgs.overlays = extraOverlays;
-
-    _module.args = {
-      inherit flakes;
-    };
   };
 in
 {

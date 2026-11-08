@@ -1,4 +1,9 @@
-{ config, lib, ... }:
+{
+  config,
+  lib,
+  inputs,
+  ...
+}:
 let
   cfg = config.wat;
 
@@ -18,6 +23,7 @@ let
         name:
         cfg.build.wrapModule {
           path = dir + "/${name}";
+          extraArgs = { inherit inputs; };
         }
       )
     );

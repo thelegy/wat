@@ -1,4 +1,5 @@
-{ lib, flakes, ... }:
+inputs:
+{ lib, ... }:
 with lib;
 with types;
 
@@ -20,7 +21,7 @@ let
     }
   );
 
-  machineFiles = pipe (flakes.self.nixosConfigurations or { }) [
+  machineFiles = pipe (inputs.self.nixosConfigurations or { }) [
     (mapAttrs (_key: attrByPath [ "watExtraOutput" "machineFiles" ] { }))
     (mapAttrs (_key1: mapAttrs (_key2: val: { file = val; })))
   ];

@@ -1,9 +1,9 @@
-flakes:
+inputs:
 
 {
 
-  wat-installer = import ./installer.nix flakes;
-  wat-machine-files = import ./machine-files.nix;
+  wat-installer = import ./installer.nix inputs;
+  wat-machine-files = import ./machine-files.nix inputs;
 
   wat-installer-lib = import ./installer-lib.nix;
 

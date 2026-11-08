@@ -1,4 +1,8 @@
-{ config, lib, ... }:
+{
+  config,
+  lib,
+  ...
+}:
 let
 
   cfg = config.wat;
@@ -82,10 +86,17 @@ let
     };
 
   wrapModule =
-    x@{ path, ... }:
+    x@{
+      path,
+      extraArgs ? { },
+      ...
+    }:
     let
-      name = getModuleName x;
-      args = additionalModuleArgs { inherit path name; };
+      name = getModuleName {
+        inherit path;
+        name = x.name or null;
+      };
+      args = additionalModuleArgs { inherit path name; } // extraArgs;
       filterFunctionArgs = attrs: removeAttrs attrs (lib.attrNames args);
       module = import path;
       value =

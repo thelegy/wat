@@ -82,7 +82,7 @@ async fn run_pipeline(
         .send(Event::Pipeline(PipelineEvent::Started { hosts: hostnames }))
         .await?;
 
-    let (builds, mut errors) = build_hosts(backend.clone(), &plan.hosts, events.clone(), report).await;
+    let (builds, mut errors) = build_hosts(backend.clone(), &plan.hosts, events.clone(), report, &config).await;
 
     if !(plan.fail_early && !errors.is_empty()) && !builds.is_empty() {
         if let PlanMode::Deploy(activation) = plan.mode {
@@ -117,6 +117,7 @@ async fn build_hosts(
     hosts: &[HostPlan],
     events: EventSender,
     report: crate::results::Report,
+    config: &crate::config::Config,
 ) -> (Vec<BuildOutcome>, Vec<anyhow::Error>) {
     let mut tasks = JoinSet::new();
 
@@ -124,9 +125,10 @@ async fn build_hosts(
         let backend = backend.clone();
         let events = events.clone();
         let report = report.clone();
+        let connection = config.connection_for(&host.hostname);
         tasks.spawn(async move {
             let hostname = host.hostname.clone();
-            let result = build_host(backend, host, events).await;
+            let result = build_host(backend, host, events, connection).await;
             report.host_finished(hostname, &result);
             result
         });
@@ -139,7 +141,11 @@ async fn build_host(
     backend: Arc<dyn Backend + Send + Sync>,
     host: HostPlan,
     events: EventSender,
+    connection: crate::config::Connection,
 ) -> Result<BuildOutcome> {
+    let mut deployed = JoinSet::new();
+    let target = host.hostname.clone();
+    deployed.spawn(async move { deployed_system(&target, connection).await });
     let host_name = host.hostname.clone();
     let events = events
         .with_host(host_name.clone())
@@ -183,11 +189,17 @@ async fn build_host(
             .with_context(|| format!("failed to build {}", host.installable))?;
 
         let store_path = resolve_store_path(&out_link).await?;
+        // Never wait for the target after its build has completed. Dropping the
+        // task set cancels any pending lookup, including its child process.
+        let current = deployed.try_join_next().and_then(|result| result.ok()).flatten();
+        drop(deployed);
+        let deployed = current.map(|current| current == store_path);
 
         events
             .send(Event::Artifact(ArtifactEvent::Ready {
                 host: host_name.clone(),
                 path: store_path.clone(),
+                deployed,
             }))
             .await?;
 
@@ -218,6 +230,32 @@ async fn build_host(
     }
 
     result
+}
+
+// This best-effort probe runs alongside evaluation and building. It must never
+// prompt for credentials or print connection errors into the build log.
+async fn deployed_system(hostname: &str, connection: crate::config::Connection) -> Option<PathBuf> {
+    let mut command = match connection {
+        crate::config::Connection::Ssh => {
+            let mut command = Command::new("ssh");
+            command.args(["-o", "BatchMode=yes", &format!("root@{hostname}"),
+                "readlink -e /run/current-system"]);
+            command
+        }
+        crate::config::Connection::Sudo => {
+            let mut command = Command::new("sudo");
+            command.args(["-n", "readlink", "-e", "/run/current-system"]);
+            command
+        }
+    };
+    command.kill_on_drop(true).stdin(std::process::Stdio::null());
+    let output = command.output().await.ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let path = String::from_utf8(output.stdout).ok()?;
+    let path = path.trim();
+    path.starts_with("/nix/store/").then(|| PathBuf::from(path))
 }
 
 async fn deploy_hosts(

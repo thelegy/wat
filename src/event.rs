@@ -93,7 +93,7 @@ pub enum HostEvent {
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub enum ArtifactEvent {
-    Ready { host: String, path: PathBuf },
+    Ready { host: String, path: PathBuf, #[serde(default)] deployed: Option<bool> },
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]

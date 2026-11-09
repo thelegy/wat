@@ -201,14 +201,24 @@ impl IndicatifReporter {
 
     fn emit_artifact(&self, artifact: &ArtifactEvent) {
         match artifact {
-            ArtifactEvent::Ready { host, path } => {
+            ArtifactEvent::Ready { host, path, deployed } => {
+                let (icon, color) = match deployed {
+                    Some(true) => ("✓", palette::DONE),
+                    Some(false) => ("↑", 68), // blue
+                    None => ("?", 220), // yellow
+                };
+                let icon = if palette::colors_enabled() {
+                    palette::regular(icon, color)
+                } else {
+                    icon.to_string()
+                };
                 self.log(
                     Level::Info,
                     &EventScope {
                         host: Some(host.clone()),
                         phase: Some(PipelinePhase::Build),
                     },
-                    &format!("Built: {}", path.display()),
+                    &format!("Built: {} {icon}", path.display()),
                 );
             }
         }

@@ -133,3 +133,26 @@ printed to stderr and cause failure exit status. Individual host failures retain
 the existing aggregate failure exit status. Reports contain no timestamps or
 completion-order-dependent fields; error text can include environment-specific
 paths. Report paths should be dedicated output files, separate from inputs and logs.
+
+### Flakes without flake-parts
+
+Use `wat.lib.mkWatRepo` with your flake inputs and a callback returning settings
+and `outputs`:
+
+```nix
+outputs = inputs@{ wat, ... }:
+  wat.lib.mkWatRepo inputs ({ findModules, findMachines, ... }: {
+    namespace = [ "my-repo" ];
+    outputs = {
+      nixosModules = findModules ./modules;
+      nixosConfigurations = findMachines ./machines;
+    };
+  });
+```
+
+The callback receives the same helpers as `config.wat.lib`, including `mkModule`,
+`mkMachine`, `hostModule`, `toNamespace`, and `fromNamespace`. Settings correspond
+to the `wat` module options, including module and overlay loading controls.
+Machine files receive `{ inputs, mkMachine }`. This adapter uses the current
+module implementation; removed legacy options such as `enableAutoBuildTargets`
+are not supported, and outputs are explicitly provided by the callback.

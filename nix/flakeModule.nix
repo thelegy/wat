@@ -1,4 +1,4 @@
-{ inputs, ... }:
+{ ... }:
 {
-  imports = [ (inputs.import-tree ../modules) ];
+  imports = (import ./repoModules.nix) ++ [ ../modules/tooling.nix ];
 }

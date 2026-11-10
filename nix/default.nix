@@ -1,6 +1,8 @@
 inputs@{ ... }:
 let
 
+  lib.mkWatRepo = import ./mkWatRepo.nix inputs;
+
   flakeModule = ./flakeModule.nix;
 
   flakeModules.default = flakeModule;
@@ -16,6 +18,7 @@ let
 in
 {
   inherit
+    lib
     flakeModule
     flakeModules
     nixosModules
@@ -24,6 +27,7 @@ in
     ;
   inherit (inputs.dev)
     checks
+    tests
     devShells
     formatter
     packages

@@ -1,6 +1,7 @@
 mod backend;
 pub mod cli;
 mod config;
+mod connection;
 mod event;
 mod operations;
 mod palette;

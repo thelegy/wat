@@ -13,6 +13,7 @@ use tokio::{
 use crate::{
     backend::{self, Backend},
     cli::Command as CliCommand,
+    connection::{self, Target},
     event::{
         ArtifactEvent, Event, EventBus, EventSender, HostEvent, LogEvent, PipelineEvent,
         PipelinePhase,
@@ -67,7 +68,7 @@ async fn run_pipeline(
         .map(|host| {
             let mut phases = vec![PipelinePhase::Evaluate, PipelinePhase::Build];
             if matches!(plan.mode, PlanMode::Deploy(_)) {
-                if config.connection_for(host) != crate::config::Connection::Sudo {
+                if connection::target(host, config.connection_for(host)).store_destination().is_some() {
                     phases.push(PipelinePhase::Upload);
                 }
                 phases.push(PipelinePhase::Deploy);
@@ -235,19 +236,8 @@ async fn build_host(
 // This best-effort probe runs alongside evaluation and building. It must never
 // prompt for credentials or print connection errors into the build log.
 async fn deployed_system(hostname: &str, connection: crate::config::Connection) -> Option<PathBuf> {
-    let mut command = match connection {
-        crate::config::Connection::Ssh => {
-            let mut command = Command::new("ssh");
-            command.args(["-o", "BatchMode=yes", &format!("root@{hostname}"),
-                "readlink -e /run/current-system"]);
-            command
-        }
-        crate::config::Connection::Sudo => {
-            let mut command = Command::new("sudo");
-            command.args(["-n", "readlink", "-e", "/run/current-system"]);
-            command
-        }
-    };
+    let target = connection::target(hostname, connection);
+    let mut command = target.command(&["readlink", "-e", "/run/current-system"], true);
     command.kill_on_drop(true).stdin(std::process::Stdio::null());
     let output = command.output().await.ok()?;
     if !output.status.success() {
@@ -311,18 +301,8 @@ async fn deploy_host(
         .await?;
 
     let result = async {
-        if connection == crate::config::Connection::Sudo {
-            deploy_local(&store_path, activation, &events).await?;
-        } else {
-            deploy_remote(
-                backend.clone(),
-                &host_name,
-                &store_path,
-                activation,
-                events.clone(),
-            )
-            .await?;
-        }
+        let target = connection::target(&host_name, connection);
+        deploy_target(backend, target.as_ref(), &store_path, activation, &events).await?;
 
         events
             .send(Event::Host(HostEvent::Finished {
@@ -388,119 +368,46 @@ async fn resolve_store_path(link: &Path) -> Result<PathBuf> {
         .with_context(|| format!("failed to resolve store path for {}", link.display()))
 }
 
-async fn deploy_local(
+async fn deploy_target(
+    backend: Arc<dyn Backend + Send + Sync>,
+    target: &dyn Target,
     store_path: &Path,
     plan: planner::ActivationPlan,
     events: &EventSender,
 ) -> Result<()> {
-    let store_path_str = store_path
-        .to_str()
-        .context("store path contains invalid UTF-8")?;
-
-    if plan.set_profile {
-        run_command_status(
-            "sudo",
-            &[
-                "nix-env",
-                "--profile",
-                "/nix/var/nix/profiles/system",
-                "--set",
-                store_path_str,
-            ],
+    if let Some(destination) = target.store_destination() {
+        deployment_stage(
             events,
-        )
-        .await
-        .context("failed to set system profile")?;
+            PipelinePhase::Upload,
+            backend.copy_closure(store_path, &destination, true, events.clone()),
+        ).await.context("failed to copy store path to target")?;
     }
 
-    let switch_to_config = store_path.join("bin/switch-to-configuration");
-    let switch_to_config = switch_to_config
-        .to_str()
-        .context("switch-to-configuration path contains invalid UTF-8")?;
+    let store_path_str = store_path.to_str().context("store path contains invalid UTF-8")?;
+    if plan.set_profile {
+        run_target_command(target.command(&[
+            "nix-env", "--profile", "/nix/var/nix/profiles/system", "--set", store_path_str,
+        ], false), events).await.context("failed to set system profile")?;
+    }
+
+    let switch = store_path.join("bin/switch-to-configuration");
+    let switch = switch.to_str().context("switch-to-configuration path contains invalid UTF-8")?;
     deployment_stage(
         events,
         PipelinePhase::Activate,
-        run_activation("sudo", &[switch_to_config, plan.command], events),
-    )
-    .await
-    .with_context(|| format!("failed to run switch-to-configuration {}", plan.command))?;
+        async {
+            let mut command = target.command(&[switch, plan.command], false);
+            let status = crate::recording::execute_visible(&mut command, events).await?;
+            activation_result(status, events).await
+        },
+    ).await.with_context(|| format!("failed to run switch-to-configuration {}", plan.command))?;
 
-    run_command_status("sync", &[], events)
-        .await
-        .context("failed to sync filesystem")?;
-
+    run_target_command(target.sync_command(), events).await.context("failed to sync filesystem")?;
     if plan.reboot {
-        deployment_stage(
-            events,
-            PipelinePhase::Reboot,
-            run_command_status("sudo", &["systemctl", "reboot"], events),
-        )
-        .await
-        .context("failed to reboot host")?;
+        deployment_stage(events, PipelinePhase::Reboot,
+            run_target_command(target.command(&["systemctl", "reboot"], false), events),
+        ).await.context("failed to reboot host")?;
     }
-
-    Ok(())
-}
-
-async fn deploy_remote(
-    backend: Arc<dyn Backend + Send + Sync>,
-    hostname: &str,
-    store_path: &Path,
-    plan: planner::ActivationPlan,
-    events: EventSender,
-) -> Result<()> {
-    let remote_store = format!("ssh://root@{hostname}");
-    deployment_stage(
-        &events,
-        PipelinePhase::Upload,
-        backend.copy_closure(store_path, remote_store.as_str(), true, events.clone()),
-    )
-    .await
-    .with_context(|| format!("failed to copy store path to {hostname}"))?;
-
-    let remote_host = format!("root@{hostname}");
-
-    if plan.set_profile {
-        let remote_cmd = format!(
-            "nix-env --profile /nix/var/nix/profiles/system --set {}",
-            store_path.display()
-        );
-        run_command_status("ssh", &[remote_host.as_str(), remote_cmd.as_str()], &events)
-            .await
-            .with_context(|| format!("failed to set remote profile on {hostname}"))?;
-    }
-
-    let remote_switch_cmd = format!(
-        "{}/bin/switch-to-configuration {}",
-        store_path.display(),
-        plan.command
-    );
-    deployment_stage(
-        &events,
-        PipelinePhase::Activate,
-        run_activation(
-            "ssh",
-            &[remote_host.as_str(), remote_switch_cmd.as_str()],
-            &events,
-        ),
-    )
-    .await
-    .with_context(|| format!("failed to switch configuration remotely on {hostname}"))?;
-
-    run_command_status("ssh", &[remote_host.as_str(), "sync"], &events)
-        .await
-        .with_context(|| format!("failed to sync remote filesystem on {hostname}"))?;
-
-    if plan.reboot {
-        deployment_stage(
-            &events,
-            PipelinePhase::Reboot,
-            run_command_status("ssh", &[remote_host.as_str(), "systemctl reboot"], &events),
-        )
-        .await
-        .with_context(|| format!("failed to reboot remote host {hostname}"))?;
-    }
-
     Ok(())
 }
 
@@ -520,13 +427,6 @@ pub fn failure_reported(error: &anyhow::Error) -> bool {
     error.is::<PipelineFailed>()
 }
 
-async fn run_activation(program: &str, args: &[&str], events: &EventSender) -> Result<()> {
-    let mut command = Command::new(program);
-    command.args(args);
-    let status = crate::recording::execute_visible(&mut command, events).await?;
-    activation_result(status, events).await
-}
-
 async fn activation_result(status: std::process::ExitStatus, events: &EventSender) -> Result<()> {
     if status.code() == Some(4) {
         events.with_phase(PipelinePhase::Activate).send(Event::Log(LogEvent {
@@ -541,15 +441,12 @@ async fn activation_result(status: std::process::ExitStatus, events: &EventSende
     }
 }
 
-async fn run_command_status(program: &str, args: &[&str], events: &EventSender) -> Result<()> {
-    let mut command = Command::new(program);
-    command.args(args);
+async fn run_target_command(mut command: Command, events: &EventSender) -> Result<()> {
     let status = crate::recording::execute_visible(&mut command, events).await?;
-
     if status.success() {
         Ok(())
     } else {
-        bail!("{program} exited with status {status}")
+        bail!("target command exited with status {status}")
     }
 }
 

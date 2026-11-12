@@ -64,6 +64,32 @@ in
         expr = result.overlays;
         expected = [ ];
       };
+      testOverlayFinalPackageSet = {
+        expr =
+          let
+            repo = mkWatRepo lib inputs (
+              { hostModule, ... }:
+              {
+                dontLoadWatModules = true;
+                dontLoadWatOverlay = true;
+                loadOverlays = [
+                  (final: prev: {
+                    answer = final.base + prev.increment;
+                  })
+                ];
+                outputs.overlays = hostModule.nixpkgs.overlays;
+              }
+            );
+            pkgs = lib.fix (
+              lib.extends (lib.composeManyExtensions repo.overlays) (_: {
+                base = 40;
+                increment = 2;
+              })
+            );
+          in
+          pkgs.answer;
+        expected = 42;
+      };
       testSystemArguments = {
         expr = result.primed;
         expected = 42;

@@ -36,7 +36,14 @@
       default = false;
     };
     loadOverlays = lib.mkOption {
-      type = lib.types.listOf lib.types.anything;
+      type = lib.types.listOf (
+        lib.mkOptionType {
+          name = "nixpkgs-overlay";
+          description = "nixpkgs overlay";
+          check = lib.isFunction;
+          merge = lib.mergeOneOption;
+        }
+      );
       default = [ ];
     };
 
